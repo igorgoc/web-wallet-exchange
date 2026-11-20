@@ -51,6 +51,7 @@ import { walletState } from "@/state/walletState";
 import { WalletUtils } from "@/util/walletUtils";
 import { NetworkStateUtils } from "@/state/utils/networkStateUtils";
 import { WalletStateUtils } from "@/state/utils/walletStateUtils";
+import { Password } from "tsjs-xpx-chain-sdk";
 import { useI18n } from "vue-i18n";
 
 const { t } = useI18n();
