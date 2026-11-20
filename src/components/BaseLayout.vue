@@ -1,0 +1,48 @@
+<template>
+  <div class="flex h-screen bg-gray-200">
+    <NavigationMenu v-if="!isExchangeView" />
+
+    <div class="flex-1 flex flex-col overflow-hidden">
+      <HeaderComponentVue v-if="!isExchangeView" class="z-50"/>
+      <main 
+        class="flex-1 overflow-x-hidden flex flex-col justify-between" 
+        :class="isExchangeView ? 'bg-[#080c14] p-0 overflow-y-hidden h-full' : 'bg-white overflow-y-auto'"
+      >
+        <div class="flex flex-col" :class="{ 'h-full flex-1 overflow-hidden': isExchangeView }">
+          <slot />
+        </div>
+        <footer
+          v-if="!isExchangeView"
+          class="mx-auto px-6 flex text-txs lg:text-xs justify-between container pb-5 items-center"
+        >
+          <div class="ml-2 sm:ml-0">
+            {{ $t('home.copyright', {date: lastActiveYear}) }}
+            <a
+              href="https://t.me/proximaxhelpdesk"
+              target="_new"
+              class="text-blue-primary hover:underline"
+              >{{ $t('home.helpdesk') }}</a
+            >
+          </div>
+          <div class="mr-2 sm:mr-0 py-2 sm:py-0">
+            <span> {{ $t('home.version') }} {{ version }}</span>
+          </div>
+        </footer>
+      </main>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
+import HeaderComponentVue from './HeaderComponent.vue'
+import NavigationMenu from './NavigationMenu.vue'
+import packageData from '../../package.json'
+
+const route = useRoute()
+const isExchangeView = computed(() => route.name === 'ViewServicesClobExchange' || (route.path && route.path.includes('/clob-exchange')))
+
+const version = packageData.version
+const lastActiveYear = BUILD_YEAR;
+</script>
