@@ -628,7 +628,7 @@ const getClobApiBase = () => {
   if (hostname === 'localhost' || hostname === '127.0.0.1') {
     return `http://${hostname}:8088`;
   }
-  return '';
+  return 'https://sirius-clob-backend.onrender.com';
 };
 const CLOB_API_BASE = getClobApiBase();
 const router = useRouter();
