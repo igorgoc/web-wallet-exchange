@@ -1580,8 +1580,9 @@ async function submitOrder() {
         );
       }
 
-      await syncFromNode();
-      await syncBatchStatus();
+      isSubmitting.value = false;
+      syncFromNode().catch(() => {});
+      syncBatchStatus().catch(() => {});
     } else {
       handleApiError(res, data, 'Order Error');
     }
@@ -1632,8 +1633,8 @@ async function cancelOrder(id: number) {
     if (data.ok) {
       applyBalances(data.balances);
       myOpenOrders.value = myOpenOrders.value.filter((o) => o.id !== id);
-      await syncFromNode();
       showToast('Order Cancelled', `Order #${id} cancelled. Escrow refunded to available balance.`, 'info');
+      syncFromNode().catch(() => {});
       return;
     } else {
       handleApiError(res, data, 'Cancellation Failed');
