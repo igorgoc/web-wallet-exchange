@@ -703,12 +703,12 @@ export default {
     })
 
     const getSwapApiBase = () => {
-      if (typeof window === 'undefined') return '';
+      if (typeof window === 'undefined') return 'https://sirius-clob-backend.onrender.com';
       const { hostname } = window.location;
       if (hostname === 'localhost' || hostname === '127.0.0.1') {
         return `http://${hostname}:8088`;
       }
-      return '';
+      return 'https://sirius-clob-backend.onrender.com';
     };
     const swapApiBase = getSwapApiBase();
 
@@ -990,7 +990,14 @@ export default {
           }),
         });
 
-        const data = await res.json();
+        let data = {};
+        try {
+          data = await res.json();
+        } catch (_) {
+          const errText = await res.text().catch(() => '');
+          throw new Error(errText || `Server responded with status ${res.status}`);
+        }
+
         if (data.status === 'CONFIRMED') {
           claimTxSuccess.value = `Deposit confirmed on-chain! Block #${data.blockNumber || 'confirmed'} - Credited ${data.amount} ${tokenName} to your Sirius account.`;
           claimTxHash.value = '';

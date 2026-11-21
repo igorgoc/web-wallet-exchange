@@ -76,12 +76,12 @@ export default {
       };
 
     const getSwapApiBase = () => {
-      if (typeof window === 'undefined') return '';
+      if (typeof window === 'undefined') return 'https://sirius-clob-backend.onrender.com';
       const hostname = window.location.hostname || '127.0.0.1';
       if (hostname === 'localhost' || hostname === '127.0.0.1') {
         return `http://${hostname}:8088`;
       }
-      return '';
+      return 'https://sirius-clob-backend.onrender.com';
     };
 
     let swapData = new ChainSwapConfig(networkState.chainNetworkName);
