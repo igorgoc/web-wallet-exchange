@@ -51,6 +51,23 @@
           <span class="stat-lbl">24h Volume</span>
           <span class="stat-val font-mono">{{ volume24h.toLocaleString() }} XPX</span>
         </div>
+
+        <div class="stat-sep" v-if="pancakeOracle"></div>
+
+        <!-- PancakeSwap Live Pool Reference -->
+        <div class="stat-item pcs-stat" v-if="pancakeOracle" title="Live PancakeSwap V2 Pool on BNB Smart Chain (0x439b...2da5)">
+          <span class="stat-lbl">PancakeSwap (BSC)</span>
+          <a 
+            href="https://www.dextools.io/app/bnb/pair-explorer/0x439b8e49f2b0d9c9824d5ab641d677511f362da5" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            class="stat-val font-mono pcs-link"
+          >
+            <span class="pcs-dot"></span>
+            {{ isBnbPair ? pancakeOracle.priceBnb.toFixed(8) + ' BNB' : '$' + pancakeOracle.priceUsdt.toFixed(6) }}
+            <span class="pcs-tag">DexTools ↗</span>
+          </a>
+        </div>
       </div>
 
       <!-- SIRIUS CLOB Brand Badge (Center Empty Space) -->
@@ -886,6 +903,23 @@ const low24h = ref<number>(0.004850);
 const volume24h = ref<number>(1284000);
 const lastTradeSide = ref<'buy' | 'sell'>('buy');
 const isConnected = ref<boolean>(false);
+
+interface PancakeOracleData {
+  ok: boolean;
+  source: string;
+  pairAddress: string;
+  baseToken: string;
+  quoteToken: string;
+  xpxReserve?: number;
+  bnbReserve?: number;
+  priceBnb: number;
+  priceUsdt: number;
+  liquidityUsd?: number;
+  volume24hUsd?: number;
+  priceChange24h?: number;
+  timestamp?: number;
+}
+const pancakeOracle = ref<PancakeOracleData | null>(null);
 
 // Active Wallet Account from session
 const activeAccount = computed(() => {
@@ -2062,10 +2096,36 @@ function loadCandlesToChart() {
   chart.timeScale().scrollToRealTime();
 }
 
-function changeInterval(tf: ChartInterval) {
+async function fetchRealCandles(tf?: ChartInterval) {
+  const targetTf = tf || activeInterval.value;
+  const pairParam = selectedPair.value.toLowerCase().replace('/', '_');
+  try {
+    const res = await fetch(`${CLOB_API_BASE}/api/clob/candles?pair=${pairParam}&interval=${targetTf}&limit=200`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.ok && Array.isArray(data.candles) && data.candles.length > 0) {
+        candleData[targetTf] = data.candles.map((c: any) => ({
+          time: c.time as UTCTimestamp,
+          timeStr: new Date(c.time * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          o: c.open,
+          h: c.high,
+          l: c.low,
+          c: c.close,
+          v: c.volume || 0
+        }));
+        if (targetTf === activeInterval.value) {
+          loadCandlesToChart();
+        }
+      }
+    }
+  } catch (_) {}
+}
+
+async function changeInterval(tf: ChartInterval) {
   activeInterval.value = tf;
   hoverCandle.value = null;
   loadCandlesToChart();
+  await fetchRealCandles(tf);
 }
 
 function updateChartPrice(p: number) {
@@ -2419,6 +2479,20 @@ async function syncFromNode() {
       }
     }
 
+    // 2.1 Fetch Real OHLCV Candles from Backend
+    await fetchRealCandles(activeInterval.value);
+
+    // 2.2 Sync PancakeSwap Live Reference Price Oracle (BSC)
+    try {
+      const resPancake = await fetch(`${CLOB_API_BASE}/api/clob/oracle/pancakeswap`);
+      if (resPancake.ok) {
+        const pJson = await resPancake.json();
+        if (pJson.ok) {
+          pancakeOracle.value = pJson;
+        }
+      }
+    } catch (_) {}
+
     // 3. Sync Open Resting Orders for Active User
     try {
       const resOrders = await fetch(`${CLOB_API_BASE}/api/clob/orders/open?publicKey=${pubKey}&pair=${pairParam}`);
@@ -2761,6 +2835,49 @@ onUnmounted(() => {
 .stat-item {
   display: flex;
   flex-direction: column;
+}
+
+.pcs-stat {
+  display: flex;
+  flex-direction: column;
+}
+
+.pcs-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #38bdf8 !important;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.15s ease;
+}
+
+.pcs-link:hover {
+  color: #7dd3fc !important;
+  text-decoration: none;
+  filter: brightness(1.2);
+}
+
+.pcs-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #38bdf8;
+  display: inline-block;
+  box-shadow: 0 0 6px #38bdf8;
+}
+
+.pcs-tag {
+  font-size: 9px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #38bdf8;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  margin-left: 2px;
 }
 
 .stat-lbl {
