@@ -55,6 +55,7 @@ import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { SwapUtils } from "@/util/swapUtils";
 import { networkState } from "@/state/networkState";
+import { walletState } from "@/state/walletState";
 import { ChainSwapConfig } from "@/models/stores/chainSwapConfig";
 import { useI18n } from 'vue-i18n';
 export default {
@@ -92,9 +93,16 @@ export default {
       swapData.swap_SERVICE_URL = `${swapApiBase}/api/swap`;
       swapData.priceConsultURL = `${swapApiBase}/api/swap`;
       swapData.gasPriceConsultURL = `${swapApiBase}/api/swap/gas`;
-      swapData.BSCChainId = 97;
-      swapData.BSCNetworkName = 'BSC Testnet';
-      swapData.BSCScanUrl = 'https://testnet.bscscan.com/tx/';
+      const isMainnet = (networkState.currentNetworkProfile?.network?.type === 184) || (walletState.currentLoggedInWallet?.accounts?.[0]?.address?.startsWith('X'));
+      if (isMainnet) {
+        swapData.BSCChainId = 56;
+        swapData.BSCNetworkName = 'BNB Smart Chain Mainnet';
+        swapData.BSCScanUrl = 'https://bscscan.com/tx/';
+      } else {
+        swapData.BSCChainId = 97;
+        swapData.BSCNetworkName = 'BSC Testnet';
+        swapData.BSCScanUrl = 'https://testnet.bscscan.com/tx/';
+      }
       swapData.saveToLocalStorage();
     }
     const getBaseURL = remoteNetwork =>{

@@ -712,6 +712,13 @@ export default {
     };
     const swapApiBase = getSwapApiBase();
 
+    const checkIsMainnet = () => {
+      const netType = networkState.currentNetworkProfile?.network?.type;
+      if (netType === 184) return true;
+      const addr = walletState.currentLoggedInWallet?.accounts?.[0]?.address || '';
+      return addr.startsWith('X');
+    };
+
     let swapData = new ChainSwapConfig(networkState.chainNetworkName);
     swapData.init();
     if (!swapData.swap_XPX_BSC_URL || swapData.swap_XPX_BSC_URL.includes('xpxsirius.io')) {
@@ -720,9 +727,15 @@ export default {
       swapData.swap_SERVICE_URL = `${swapApiBase}/api/swap`;
       swapData.priceConsultURL = `${swapApiBase}/api/swap`;
       swapData.gasPriceConsultURL = `${swapApiBase}/api/swap/gas`;
-      swapData.BSCChainId = 97;
-      swapData.BSCNetworkName = 'BSC Testnet';
-      swapData.BSCScanUrl = 'https://testnet.bscscan.com/tx/';
+      if (checkIsMainnet()) {
+        swapData.BSCChainId = 56;
+        swapData.BSCNetworkName = 'BNB Smart Chain Mainnet';
+        swapData.BSCScanUrl = 'https://bscscan.com/tx/';
+      } else {
+        swapData.BSCChainId = 97;
+        swapData.BSCNetworkName = 'BSC Testnet';
+        swapData.BSCScanUrl = 'https://testnet.bscscan.com/tx/';
+      }
       swapData.saveToLocalStorage();
     }
 
@@ -781,17 +794,25 @@ export default {
 
     const switchToBscTestnet = async () => {
       if (!window.ethereum) return;
+      const isMainnet = checkIsMainnet();
+      const targetChainHex = isMainnet ? '0x38' : '0x61';
       try {
         await window.ethereum.request({
           method: 'wallet_switchEthereumChain',
-          params: [{ chainId: '0x61' }], // 97 in hex
+          params: [{ chainId: targetChainHex }],
         });
       } catch (switchError) {
         if (switchError.code === 4902) {
           await window.ethereum.request({
             method: 'wallet_addEthereumChain',
             params: [
-              {
+              isMainnet ? {
+                chainId: '0x38',
+                chainName: 'BNB Smart Chain Mainnet',
+                nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
+                rpcUrls: ['https://bsc-dataseed.binance.org/'],
+                blockExplorerUrls: ['https://bscscan.com'],
+              } : {
                 chainId: '0x61',
                 chainName: 'BNB Smart Chain Testnet',
                 nativeCurrency: { name: 'tBNB', symbol: 'tBNB', decimals: 18 },
