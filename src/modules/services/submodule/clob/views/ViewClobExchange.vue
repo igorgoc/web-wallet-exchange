@@ -967,20 +967,21 @@ const displayAccountBnb = computed(() => {
 
 // Direct Tradeable Balances (Live On-Chain Wallet Balance minus SuperContract Escrow Lock)
 const totalAvailableXpx = computed(() => {
-  const base = isClobBalanceLoaded.value ? userXpxBalance.value : Math.max(0, displayAccountXpx.value - lockedXpxEscrow.value);
+  const walletAvail = Math.max(0, displayAccountXpx.value - lockedXpxEscrow.value);
+  const base = Math.max(userXpxBalance.value, walletAvail);
   return Math.max(0, parseFloat((base - 0.2).toFixed(6))); // Reserve 0.2 XPX for L1 network gas
 });
 
 const totalAvailableUsdt = computed(() => {
-  return isClobBalanceLoaded.value
-    ? parseFloat(userUsdtBalance.value.toFixed(2))
-    : Math.max(0, parseFloat((displayAccountUsdt.value - lockedUsdtEscrow.value).toFixed(2)));
+  const walletAvail = Math.max(0, displayAccountUsdt.value - lockedUsdtEscrow.value);
+  const base = Math.max(userUsdtBalance.value, walletAvail);
+  return parseFloat(base.toFixed(2));
 });
 
 const totalAvailableBnb = computed(() => {
-  return isClobBalanceLoaded.value
-    ? parseFloat(userBnbBalance.value.toFixed(6))
-    : Math.max(0, parseFloat((displayAccountBnb.value - lockedBnbEscrow.value).toFixed(6)));
+  const walletAvail = Math.max(0, displayAccountBnb.value - lockedBnbEscrow.value);
+  const base = Math.max(userBnbBalance.value, walletAvail);
+  return parseFloat(base.toFixed(6));
 });
 
 // Total tradeable spending check across entire unified balance
@@ -1011,7 +1012,7 @@ async function fetchOnChainBalances() {
         onChainUsdt.value = Number(data.balances.usdt || 0);
         onChainBnb.value = Number(data.balances.bnb || 0);
         isOnChainFetched.value = true;
-        if (activeAccount.value) {
+        if (activeAccount.value && onChainXpx.value > 0) {
           (activeAccount.value as any).balance = onChainXpx.value;
         }
         return;
@@ -1021,7 +1022,10 @@ async function fetchOnChainBalances() {
 
   // 2. Direct fallback to Sirius Testnet 2 / Mainnet REST Node
   try {
-    let nodeEndpoint = networkState.selectedAPIEndpoint || 'api-2.testnet2.xpxsirius.io';
+    let nodeEndpoint = networkState.selectedAPIEndpoint || (getActiveNetworkId() === 184 ? 'https://betelgeuse.xpxsirius.io' : 'api-2.testnet2.xpxsirius.io');
+    if (getActiveNetworkId() === 184 && (!networkState.selectedAPIEndpoint || networkState.selectedAPIEndpoint.includes('testnet'))) {
+      nodeEndpoint = 'https://betelgeuse.xpxsirius.io';
+    }
     if (!nodeEndpoint.startsWith('http://') && !nodeEndpoint.startsWith('https://')) {
       const proto = window.location.protocol === 'https:' ? 'https' : 'http';
       nodeEndpoint = `${proto}://${nodeEndpoint}`;
@@ -1093,7 +1097,11 @@ watch(
       lockedXpxEscrow.value = parseFloat(localStorage.getItem(`clob_bal_${rawAddr}_locked_xpx`) || '0');
       lockedUsdtEscrow.value = parseFloat(localStorage.getItem(`clob_bal_${rawAddr}_locked_usdt`) || '0.00');
       lockedBnbEscrow.value = parseFloat(localStorage.getItem(`clob_bal_${rawAddr}_locked_bnb`) || '0.00');
-      onChainXpx.value = 0;
+      if (activeAccount.value?.balance !== undefined && Number((activeAccount.value as any).balance) > 0) {
+        onChainXpx.value = Number((activeAccount.value as any).balance);
+      } else {
+        onChainXpx.value = 0;
+      }
       onChainUsdt.value = 0;
       onChainBnb.value = 0;
       fetchOnChainBalances();
