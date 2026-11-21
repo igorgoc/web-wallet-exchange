@@ -51,23 +51,6 @@
           <span class="stat-lbl">24h Volume</span>
           <span class="stat-val font-mono">{{ volume24h.toLocaleString() }} XPX</span>
         </div>
-
-        <div class="stat-sep" v-if="pancakeOracle"></div>
-
-        <!-- PancakeSwap Live Pool Reference -->
-        <div class="stat-item pcs-stat" v-if="pancakeOracle" title="Live PancakeSwap V2 Pool on BNB Smart Chain (0x439b...2da5)">
-          <span class="stat-lbl">PancakeSwap (BSC)</span>
-          <a 
-            href="https://www.dextools.io/app/bnb/pair-explorer/0x439b8e49f2b0d9c9824d5ab641d677511f362da5" 
-            target="_blank" 
-            rel="noopener noreferrer"
-            class="stat-val font-mono pcs-link"
-          >
-            <span class="pcs-dot"></span>
-            {{ isBnbPair ? pancakeOracle.priceBnb.toFixed(8) + ' BNB' : '$' + pancakeOracle.priceUsdt.toFixed(6) }}
-            <span class="pcs-tag">DexTools ↗</span>
-          </a>
-        </div>
       </div>
 
       <!-- SIRIUS CLOB Brand Badge (Center Empty Space) -->
@@ -2649,16 +2632,24 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 12px;
   margin-bottom: 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.clob-header::-webkit-scrollbar {
+  display: none;
 }
 
 .header-left {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 16px;
+  flex-shrink: 0;
 }
 
 .header-center {
@@ -3059,10 +3050,10 @@ onUnmounted(() => {
 .ohlc-bar .up { color: #10b981; }
 .ohlc-bar .down { color: #ef4444; }
 
-/* Grid Layout - Fixed Screen Workstation */
+/* Grid Layout - Fluid 3-Column Workstation */
 .clob-grid {
   display: grid;
-  grid-template-columns: 1fr 340px 340px;
+  grid-template-columns: minmax(360px, 1fr) minmax(250px, 320px) minmax(270px, 340px);
   gap: 12px;
   flex: 1;
   min-height: 0;
@@ -3070,22 +3061,35 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-@media (max-width: 1280px) {
-  .clob-grid {
-    grid-template-columns: 1fr 340px;
+@media (max-width: 1200px) {
+  .header-center {
+    display: none;
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 960px) {
   .clob-wrapper {
     height: auto;
+    min-height: 100vh;
     max-height: none;
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
   .clob-grid {
-    grid-template-columns: 1fr;
+    display: flex;
+    flex-direction: column;
     height: auto;
     overflow: visible;
+    gap: 16px;
+  }
+  .chart-and-orders-col {
+    min-height: 520px;
+  }
+  .orderbook-col {
+    min-height: 480px;
+  }
+  .order-entry-col {
+    min-height: 480px;
   }
 }
 
