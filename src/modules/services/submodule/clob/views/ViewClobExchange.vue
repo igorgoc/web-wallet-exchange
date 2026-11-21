@@ -98,11 +98,11 @@
         </button>
 
         <!-- Dev & Tools Menu Popover (...) -->
-        <div class="dev-menu-wrapper" style="position: relative; flex-shrink: 0;">
+        <div class="dev-menu-wrapper" style="position: relative; flex-shrink: 0; z-index: 1001;">
           <button 
             type="button" 
             class="icon-btn-dots" 
-            @click="showDevMenu = !showDevMenu" 
+            @click.stop="showDevMenu = !showDevMenu" 
             title="Developer Tools & Diagnostics"
           >
             •••
@@ -3223,6 +3223,8 @@ onUnmounted(() => {
 
 /* Header */
 .clob-header {
+  position: relative;
+  z-index: 1000;
   background: #0a110e;
   border: 1px solid #14221c;
   border-radius: 12px;
@@ -3233,13 +3235,7 @@ onUnmounted(() => {
   flex-wrap: nowrap;
   gap: 12px;
   margin-bottom: 12px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-}
-
-.clob-header::-webkit-scrollbar {
-  display: none;
+  overflow: visible;
 }
 
 .header-left {
@@ -3570,14 +3566,14 @@ onUnmounted(() => {
 
 .dev-dropdown-popover {
   position: absolute;
-  top: 38px;
+  top: calc(100% + 8px);
   right: 0;
-  background: #0f172a;
-  border: 1px solid #334155;
-  border-radius: 8px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
-  width: 220px;
-  z-index: 100;
+  background: #0d1512;
+  border: 1px solid #16241f;
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(44, 213, 138, 0.15);
+  width: 250px;
+  z-index: 99999;
   padding: 6px 0;
 }
 .dev-dropdown-item {
