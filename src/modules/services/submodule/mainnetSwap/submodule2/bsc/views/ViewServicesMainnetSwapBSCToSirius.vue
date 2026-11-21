@@ -976,6 +976,23 @@ export default {
         const targetPub = activeAcc?.publicKey || (walletState.currentLoggedInWallet ? walletState.currentLoggedInWallet.accounts[0]?.publicKey : '');
 
         const swapApi = getSwapApiBase();
+        const cleanRecipient = (targetAddr || '').replace(/[- ]/g, '').toUpperCase();
+        let evmSignature = null;
+
+        // If transaction omitted memo, try obtaining an EVM signature from connected wallet to prove ownership
+        if (typeof window !== 'undefined' && window.ethereum) {
+          try {
+            const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+            if (accounts && accounts.length > 0) {
+              const msg = `Claim Bridge Deposit ${hash.toLowerCase()} to Sirius ${cleanRecipient}`;
+              evmSignature = await window.ethereum.request({
+                method: 'personal_sign',
+                params: [msg, accounts[0]],
+              });
+            }
+          } catch (_) {}
+        }
+
         const res = await fetch(`${swapApi}/api/swap/sirius/${tokenName.toLowerCase()}/transfer`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -983,6 +1000,7 @@ export default {
             recipient: targetAddr,
             publicKey: targetPub,
             token: tokenName,
+            signature: evmSignature,
             txnInfo: {
               network: 'BSC',
               txnHash: hash,
