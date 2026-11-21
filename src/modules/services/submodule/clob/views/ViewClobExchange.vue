@@ -37,17 +37,17 @@
           <span class="stat-change" :class="lastTradeSide === 'buy' ? 'up' : 'down'">+4.16%</span>
         </div>
 
-        <div class="stat-sep"></div>
+        <div class="stat-sep mobile-hide"></div>
 
-        <div class="stat-item">
+        <div class="stat-item mobile-hide">
           <span class="stat-lbl">24h High</span>
           <span class="stat-val font-mono">{{ formatCleanPrice(high24h) }}</span>
         </div>
-        <div class="stat-item">
+        <div class="stat-item mobile-hide">
           <span class="stat-lbl">24h Low</span>
           <span class="stat-val font-mono">{{ formatCleanPrice(low24h) }}</span>
         </div>
-        <div class="stat-item">
+        <div class="stat-item mobile-hide">
           <span class="stat-lbl">24h Volume</span>
           <span class="stat-val font-mono">{{ volume24h.toLocaleString() }} XPX</span>
         </div>
@@ -73,11 +73,11 @@
       <div class="header-right">
         <!-- User Active Wallet & Tradeable Balance Area -->
         <div class="wallet-balance-area font-mono" v-if="activeAccount">
-          <span class="wallet-addr">{{ shortAddress(activeAccount.address) }}</span>
+          <span class="wallet-addr mobile-hide">{{ shortAddress(activeAccount.address) }}</span>
+          <span class="bal-sep mobile-hide">•</span>
+          <span class="bal-val text-emerald-400" title="Tradeable XPX">{{ totalAvailableXpx.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 }) }} XPX</span>
           <span class="bal-sep">•</span>
-          <span class="bal-val text-emerald-400" title="Tradeable XPX">{{ totalAvailableXpx.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} XPX</span>
-          <span class="bal-sep">•</span>
-          <span v-if="isBnbPair" class="bal-val text-emerald-400" title="Tradeable BNB">{{ totalAvailableBnb.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 }) }} BNB</span>
+          <span v-if="isBnbPair" class="bal-val text-emerald-400" title="Tradeable BNB">{{ totalAvailableBnb.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) }} BNB</span>
           <span v-else class="bal-val text-emerald-400" title="Tradeable USDT">${{ totalAvailableUsdt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} USDT</span>
           <button class="withdraw-pill ml-2" @click="openWithdrawModal" title="Withdraw funds from CLOB Vault to L1 wallet">
             Withdraw
@@ -127,8 +127,40 @@
       </div>
     </header>
 
-    <!-- Main Trading Grid -->
-    <main class="clob-grid">
+    <!-- Mobile Navigation Segmented Control (Visible only on iPhone / Android <= 768px) -->
+    <nav class="mobile-segmented-bar" v-if="isMobile">
+      <button 
+        type="button" 
+        class="mobile-segment-btn" 
+        :class="{ active: mobileTab === 'trade' }" 
+        @click="mobileTab = 'trade'"
+      >
+        <span class="segment-icon">⚡</span>
+        <span>Trade</span>
+      </button>
+      <button 
+        type="button" 
+        class="mobile-segment-btn" 
+        :class="{ active: mobileTab === 'chart' }" 
+        @click="mobileTab = 'chart'"
+      >
+        <span class="segment-icon">📈</span>
+        <span>Chart</span>
+      </button>
+      <button 
+        type="button" 
+        class="mobile-segment-btn" 
+        :class="{ active: mobileTab === 'orders' }" 
+        @click="mobileTab = 'orders'"
+      >
+        <span class="segment-icon">📋</span>
+        <span>Orders</span>
+        <span v-if="myOpenOrders.length > 0" class="mobile-order-badge">{{ myOpenOrders.length }}</span>
+      </button>
+    </nav>
+
+    <!-- Main Trading Grid (Desktop 3-Column Workstation) -->
+    <main class="clob-grid" v-if="!isMobile">
       <!-- Center-Left Column: Chart + Compact Bottom Panel -->
       <section class="chart-and-orders-col">
         <!-- Candlestick Chart Panel (TradingView Lightweight Charts) -->
@@ -532,6 +564,355 @@
       </section>
     </main>
 
+    <!-- Mobile Trading Layout (iPhone / Android) -->
+    <main class="clob-mobile-main" v-else>
+      <!-- TAB 1: MOBILE TRADE VIEW (SPLIT ORDER FORM + MINI ORDER BOOK) -->
+      <div v-show="mobileTab === 'trade'" class="mobile-trade-tab">
+        <div class="mobile-trade-split">
+          <!-- Left Column: Order Form Ticket (58%) -->
+          <div class="mobile-form-col">
+            <!-- Buy / Sell Toggle -->
+            <div class="side-toggle">
+              <button 
+                class="side-btn" 
+                :class="{ 'active-buy': orderSide === 'buy' }" 
+                @click="orderSide = 'buy'"
+              >
+                Buy
+              </button>
+              <button 
+                class="side-btn" 
+                :class="{ 'active-sell': orderSide === 'sell' }" 
+                @click="orderSide = 'sell'"
+              >
+                Sell
+              </button>
+            </div>
+
+            <!-- Order Type Select -->
+            <div class="type-toggle mt-2">
+              <button 
+                v-for="t in ['Limit', 'Market']" 
+                :key="t"
+                class="type-btn text-xs py-1"
+                :class="{ active: orderType === t }"
+                @click="orderType = t"
+              >
+                {{ t }}
+              </button>
+            </div>
+
+            <!-- Price Input -->
+            <div class="form-group mt-2" v-if="orderType === 'Limit'">
+              <div class="flex justify-between items-center mb-1 form-label-row">
+                <label class="text-[11px] text-slate-300">Price</label>
+                <button type="button" class="mid-btn-pill" @click="useMidPrice">Mid</button>
+              </div>
+              <div class="input-box">
+                <input 
+                  type="number" 
+                  v-model.number="orderPrice" 
+                  :step="priceStep" 
+                  :min="priceMin" 
+                  class="form-input font-mono"
+                />
+                <span class="unit text-[11px]">{{ quoteSymbol }}</span>
+              </div>
+            </div>
+            <div class="form-group mt-2" v-else>
+              <div class="flex justify-between items-center mb-1 form-label-row">
+                <label class="text-[11px] text-slate-300">Price</label>
+                <span class="mid-btn-pill opacity-75">Market</span>
+              </div>
+              <div class="input-box">
+                <input 
+                  type="text" 
+                  readonly 
+                  :value="formatCleanPrice(orderSide === 'buy' ? bestAskPrice : bestBidPrice) || 'Market Price'" 
+                  class="form-input font-mono cursor-default text-slate-300"
+                />
+                <span class="unit text-[11px]">{{ quoteSymbol }}</span>
+              </div>
+            </div>
+
+            <!-- Amount Input -->
+            <div class="form-group mt-2">
+              <div class="flex justify-between items-center mb-1 text-[11px] font-mono form-label-row">
+                <label class="text-slate-300">Amount</label>
+                <span class="text-emerald-400 font-semibold text-[10px] truncate max-w-[110px]" title="Available Tradeable Balance">
+                  Avail: {{ orderSide === 'buy' ? (isBnbPair ? totalAvailableBnb.toFixed(3) : '$' + totalAvailableUsdt.toFixed(1)) : (totalAvailableXpx.toLocaleString(undefined, { maximumFractionDigits: 0 })) }}
+                </span>
+              </div>
+              <div class="input-box">
+                <input 
+                  type="number" 
+                  v-model="orderAmount" 
+                  step="any" 
+                  min="1" 
+                  placeholder="0" 
+                  class="form-input font-mono"
+                />
+                <span class="unit text-[11px]">XPX</span>
+              </div>
+
+              <!-- Percentage Quick Selectors -->
+              <div class="pct-grid mt-2">
+                <button v-for="pct in [25, 50, 75, 100]" :key="pct" class="pct-btn text-[10px] py-1" @click="setAmountPct(pct)">
+                  {{ pct }}%
+                </button>
+              </div>
+            </div>
+
+            <!-- Order Summary -->
+            <div class="summary-box my-2 py-1 px-2 text-[11px]">
+              <div class="summary-row flex justify-between">
+                <span class="text-slate-400">Total</span>
+                <span class="font-mono text-slate-200">{{ formatCleanTotal(effectiveOrderPrice * (Number(orderAmount) || 0)) }} {{ quoteSymbol }}</span>
+              </div>
+            </div>
+
+            <!-- Submit Button / Unlock -->
+            <button 
+              v-if="!activeAccount"
+              type="button"
+              class="submit-trade-btn btn-unlock text-xs py-2"
+              @click="router.push('/wallets')"
+            >
+              Connect Wallet
+            </button>
+            <button 
+              v-else-if="getActiveNetworkId() === 184 && !sessionTradingPrivateKey"
+              type="button"
+              class="submit-trade-btn btn-unlock text-xs py-2"
+              @click="pendingAction = 'order'; showPasswordModal = true; passwordError = ''"
+            >
+              Unlock to Trade
+            </button>
+            <button 
+              v-else
+              class="submit-trade-btn text-xs py-2" 
+              :class="[
+                orderSide === 'buy' ? 'btn-buy' : 'btn-sell',
+                { 'btn-disabled': isInsufficientTotalBalance || !orderAmount || Number(orderAmount) <= 0 }
+              ]"
+              :disabled="isSubmitting"
+              @click="handleTradeButtonClick"
+            >
+              <span v-if="isSubmitting" class="flex items-center justify-center gap-1">
+                <span class="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                <span>Placing...</span>
+              </span>
+              <span v-else-if="!orderAmount || Number(orderAmount) <= 0">Enter Amount</span>
+              <span v-else-if="isInsufficientTotalBalance">Insufficient {{ orderSide === 'buy' ? quoteSymbol : 'XPX' }}</span>
+              <span v-else>{{ orderSide === 'buy' ? 'Buy XPX' : 'Sell XPX' }}</span>
+            </button>
+          </div>
+
+          <!-- Right Column: Mini Live Order Book (42%) -->
+          <div class="mobile-book-col">
+            <div class="mobile-ob-header">
+              <span>Price</span>
+              <span class="text-right">Size</span>
+            </div>
+
+            <!-- Top 6 Asks -->
+            <div class="mobile-ob-list asks-list">
+              <div 
+                v-for="ask in mobileDisplayedAsks" 
+                :key="ask.orderId" 
+                class="ob-row mobile-ob-row ask"
+                @click="setOrderPrice(ask.price)"
+              >
+                <div class="ob-depth-bar" :style="{ width: calcDepth(ask.amount, maxAskDepth) + '%' }"></div>
+                <span class="ob-cell font-mono text-rose-400 font-medium text-[11px]">{{ formatCleanPrice(ask.price) }}</span>
+                <span class="ob-cell font-mono text-right text-slate-300 text-[10px]">{{ formatCompactNumber(ask.amount) }}</span>
+              </div>
+              <div v-if="mobileDisplayedAsks.length === 0" class="empty-state py-2 text-[10px]">No asks</div>
+            </div>
+
+            <!-- Mid Price -->
+            <div class="mobile-ob-mid">
+              <span class="font-mono font-bold text-xs" :class="lastTradeSide === 'buy' ? 'text-emerald-400' : 'text-rose-400'">
+                {{ formatCleanPrice(currentPrice) }}
+              </span>
+              <span class="text-[9px] font-mono text-slate-400">{{ spreadPct }}%</span>
+            </div>
+
+            <!-- Top 6 Bids -->
+            <div class="mobile-ob-list bids-list">
+              <div 
+                v-for="bid in mobileDisplayedBids" 
+                :key="bid.orderId" 
+                class="ob-row mobile-ob-row bid"
+                @click="setOrderPrice(bid.price)"
+              >
+                <div class="ob-depth-bar" :style="{ width: calcDepth(bid.amount, maxBidDepth) + '%' }"></div>
+                <span class="ob-cell font-mono text-emerald-400 font-medium text-[11px]">{{ formatCleanPrice(bid.price) }}</span>
+                <span class="ob-cell font-mono text-right text-slate-300 text-[10px]">{{ formatCompactNumber(bid.amount) }}</span>
+              </div>
+              <div v-if="mobileDisplayedBids.length === 0" class="empty-state py-2 text-[10px]">No bids</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Collapsible Open Orders Drawer at bottom of Trade Tab -->
+        <div class="mobile-open-orders-card mt-3">
+          <div class="flex justify-between items-center px-3 py-2 border-b border-[#14221c]">
+            <span class="text-xs font-bold text-slate-200">Open Orders ({{ myOpenOrders.length }})</span>
+            <button type="button" class="text-xs text-emerald-400 hover:underline" @click="mobileTab = 'orders'">
+              View All ({{ myOpenOrders.length }}) →
+            </button>
+          </div>
+          <div v-if="myOpenOrders.length > 0" class="divide-y divide-slate-800/40">
+            <div v-for="order in myOpenOrders.slice(0, 2)" :key="order.id" class="px-3 py-2 flex justify-between items-center text-xs">
+              <div>
+                <span :class="order.side === 'Buy' ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'">{{ order.side }}</span>
+                <span class="ml-1 text-slate-200 font-mono">{{ order.amount.toLocaleString() }} XPX</span>
+                <span class="text-slate-400 ml-1 font-mono">@ {{ formatCleanPrice(order.price) }}</span>
+              </div>
+              <button class="cancel-btn text-[10px] py-1 px-3" @click="cancelOrder(order.id)">Cancel</button>
+            </div>
+          </div>
+          <div v-else class="text-center py-3 text-xs text-slate-500">
+            No open orders
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 2: FULL-SCREEN CANDLESTICK CHART -->
+      <div v-show="mobileTab === 'chart'" class="mobile-chart-tab">
+        <div class="panel chart-panel mobile-chart-panel">
+          <div class="panel-header">
+            <div class="chart-header-left">
+              <span class="font-bold text-slate-200">{{ selectedPair }}</span>
+              <div class="ohlc-bar font-mono text-[10px]" v-if="hoverCandle || latestCandle">
+                <span class="lbl">O</span><span class="ohlc-val">{{ formatCleanPrice((hoverCandle || latestCandle)!.o) }}</span>
+                <span class="lbl">H</span><span class="ohlc-val">{{ formatCleanPrice((hoverCandle || latestCandle)!.h) }}</span>
+                <span class="lbl">L</span><span class="ohlc-val">{{ formatCleanPrice((hoverCandle || latestCandle)!.l) }}</span>
+                <span class="lbl">C</span><span class="ohlc-val" :class="(hoverCandle || latestCandle)!.c >= (hoverCandle || latestCandle)!.o ? 'up' : 'down'">{{ formatCleanPrice((hoverCandle || latestCandle)!.c) }}</span>
+              </div>
+            </div>
+            <div class="chart-actions">
+              <button 
+                v-for="tf in (['1m', '5m', '15m', '1h'] as const)" 
+                :key="tf"
+                class="chart-btn"
+                :class="{ active: activeInterval === tf }"
+                @click="changeInterval(tf)"
+              >
+                {{ tf }}
+              </button>
+            </div>
+          </div>
+          <div class="tv-chart-container mobile-tv-chart" ref="chartContainerMobileRef"></div>
+        </div>
+
+        <!-- Sticky Quick Trade CTA Bar -->
+        <div class="mobile-chart-cta-bar">
+          <button class="mobile-cta-btn buy" @click="orderSide = 'buy'; mobileTab = 'trade'">
+            Buy {{ selectedPair.split('/')[0] }}
+          </button>
+          <button class="mobile-cta-btn sell" @click="orderSide = 'sell'; mobileTab = 'trade'">
+            Sell {{ selectedPair.split('/')[0] }}
+          </button>
+        </div>
+      </div>
+
+      <!-- TAB 3: ORDERS & TRADES HISTORY -->
+      <div v-show="mobileTab === 'orders'" class="mobile-orders-tab">
+        <div class="panel orders-tabs-panel mobile-orders-panel">
+          <div class="panel-header tab-header">
+            <div class="tabs">
+              <button 
+                class="tab-btn" 
+                :class="{ active: activeTab === 'orders' }" 
+                @click="activeTab = 'orders'"
+              >
+                Open Orders ({{ myOpenOrders.length }})
+              </button>
+              <button 
+                class="tab-btn" 
+                :class="{ active: activeTab === 'myTrades' }" 
+                @click="activeTab = 'myTrades'"
+              >
+                My Trades ({{ myTrades.length }})
+              </button>
+            </div>
+            <button 
+              v-if="activeTab === 'orders' && myOpenOrders.length > 0" 
+              class="cancel-all-btn" 
+              @click="cancelAllOrders" 
+              title="Cancel all open orders on this pair"
+            >
+              Cancel All
+            </button>
+          </div>
+
+          <div class="tab-content">
+            <!-- Open Orders Cards -->
+            <div v-if="activeTab === 'orders'" class="table-container">
+              <div v-if="myOpenOrders.length === 0" class="empty-state py-12">
+                <p class="text-slate-400">No open orders</p>
+              </div>
+              <div v-else class="mobile-order-cards">
+                <div v-for="order in myOpenOrders" :key="order.id" class="mobile-order-card">
+                  <div class="mobile-order-card-header">
+                    <span :class="order.side === 'Buy' ? 'text-emerald-400' : 'text-rose-400'" class="font-bold text-sm">
+                      {{ order.side }} {{ selectedPair.split('/')[0] }}
+                    </span>
+                    <span class="text-slate-400 text-xs font-mono">#{{ order.id }}</span>
+                  </div>
+                  <div class="mobile-order-card-body">
+                    <div class="mobile-order-field">
+                      <span class="field-lbl">Price</span>
+                      <span class="field-val font-mono">{{ formatCleanPrice(order.price) }}</span>
+                    </div>
+                    <div class="mobile-order-field">
+                      <span class="field-lbl">Amount</span>
+                      <span class="field-val font-mono">{{ order.amount.toLocaleString() }}</span>
+                    </div>
+                    <div class="mobile-order-field">
+                      <span class="field-lbl">Filled</span>
+                      <span class="field-val font-mono">{{ order.filled || '0%' }}</span>
+                    </div>
+                  </div>
+                  <div class="mobile-order-card-footer mt-2">
+                    <button class="cancel-btn mobile-cancel-btn" @click="cancelOrder(order.id)">
+                      Cancel Order
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- My Trades Cards -->
+            <div v-if="activeTab === 'myTrades'" class="table-container">
+              <div v-if="myTrades.length === 0" class="empty-state py-12">
+                <p class="text-slate-400">No personal trades executed yet</p>
+              </div>
+              <div v-else class="mobile-trade-cards">
+                <div v-for="(trade, idx) in myTrades" :key="idx" class="mobile-trade-card">
+                  <div class="flex justify-between items-center text-xs">
+                    <span :class="trade.side === 'buy' ? 'text-emerald-400' : 'text-rose-400'" class="font-bold uppercase">
+                      {{ trade.side }}
+                    </span>
+                    <span class="text-slate-400 font-mono">{{ trade.time }}</span>
+                  </div>
+                  <div class="flex justify-between items-center text-xs mt-1">
+                    <span class="text-slate-300 font-mono">{{ formatCleanPrice(trade.price) }} {{ quoteSymbol }}</span>
+                    <span class="text-slate-200 font-mono">{{ trade.amount.toLocaleString() }} XPX</span>
+                  </div>
+                  <div class="text-right text-[11px] text-slate-400 font-mono mt-1">
+                    Total: {{ formatCleanTotal(trade.price * trade.amount) }} {{ quoteSymbol }}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
     <!-- Password Unlock Modal for Session Trading -->
     <div v-if="showPasswordModal" class="modal-overlay" @click.self="showPasswordModal = false">
       <div class="modal-card">
@@ -903,6 +1284,39 @@ interface PancakeOracleData {
   timestamp?: number;
 }
 const pancakeOracle = ref<PancakeOracleData | null>(null);
+
+// Mobile Viewport & Tab Navigation
+const isMobile = ref<boolean>(false);
+const mobileTab = ref<'trade' | 'chart' | 'orders'>('trade');
+
+function formatCompactNumber(val: number | string): string {
+  const n = Number(val);
+  if (!n || isNaN(n)) return '0';
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+  return n.toLocaleString();
+}
+
+const mobileDisplayedAsks = computed(() => {
+  return asks.value.slice(0, 6).reverse();
+});
+
+const mobileDisplayedBids = computed(() => {
+  return bids.value.slice(0, 6);
+});
+
+function checkMobile() {
+  if (typeof window !== 'undefined') {
+    const wasMobile = isMobile.value;
+    const nowMobile = window.innerWidth <= 768;
+    if (wasMobile !== nowMobile) {
+      isMobile.value = nowMobile;
+      nextTick(() => {
+        initTradingViewChart();
+      });
+    }
+  }
+}
 
 // Active Wallet Account from session
 const activeAccount = computed(() => {
@@ -2052,6 +2466,12 @@ const latestCandle = computed(() => {
 
 const hoverCandle = ref<Candle | null>(null);
 const chartContainerRef = ref<HTMLDivElement | null>(null);
+const chartContainerMobileRef = ref<HTMLDivElement | null>(null);
+
+function getActiveChartContainer(): HTMLDivElement | null {
+  return isMobile.value ? chartContainerMobileRef.value : chartContainerRef.value;
+}
+
 let chart: IChartApi | null = null;
 let candleSeries: ISeriesApi<'Candlestick'> | null = null;
 let volumeSeries: ISeriesApi<'Histogram'> | null = null;
@@ -2152,7 +2572,7 @@ function updateChartPrice(p: number) {
 }
 
 function initTradingViewChart() {
-  const container = chartContainerRef.value;
+  const container = getActiveChartContainer();
   if (!container) return;
 
   if (chart) {
@@ -2161,8 +2581,8 @@ function initTradingViewChart() {
   }
 
   const rect = container.getBoundingClientRect();
-  const width = Math.max(rect.width, 300);
-  const height = Math.max(rect.height, 260);
+  const width = rect.width > 0 ? rect.width : (typeof window !== 'undefined' ? Math.max(300, window.innerWidth - 32) : 360);
+  const height = rect.height > 0 ? rect.height : (typeof window !== 'undefined' ? Math.max(260, window.innerHeight - 260) : 360);
 
   chart = createChart(container, {
     width,
@@ -2551,7 +2971,26 @@ async function fetchClobConfig() {
   } catch (_) {}
 }
 
+watch(mobileTab, (newTab) => {
+  if (newTab === 'chart') {
+    nextTick(() => {
+      const container = getActiveChartContainer();
+      if (chart && container) {
+        const rect = container.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          chart.applyOptions({ width: rect.width, height: rect.height });
+          chart.timeScale().fitContent();
+        }
+      }
+    });
+  }
+});
+
 onMounted(() => {
+  checkMobile();
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', checkMobile);
+  }
   initTradingViewChart();
   fetchClobConfig();
   syncFromNode();
@@ -2559,6 +2998,9 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', checkMobile);
+  }
   if (resizeObserver) {
     resizeObserver.disconnect();
     resizeObserver = null;
@@ -3067,7 +3509,338 @@ onUnmounted(() => {
   }
 }
 
-@media (max-width: 960px) {
+/* Mobile Segmented Control Bar */
+.mobile-segmented-bar {
+  display: flex;
+  background: #0d1512;
+  border: 1px solid #16241f;
+  border-radius: 10px;
+  padding: 3px;
+  gap: 4px;
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+
+.mobile-segment-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: #7b8e87;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.mobile-segment-btn.active {
+  background: #17382a;
+  color: #2cd58a;
+  border-color: rgba(44, 213, 138, 0.3);
+  box-shadow: 0 2px 8px rgba(44, 213, 138, 0.15);
+}
+
+.mobile-order-badge {
+  background: #2cd58a;
+  color: #071a12;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  margin-left: 2px;
+}
+
+/* Mobile Main Container */
+.clob-mobile-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+}
+
+/* Mobile Trade View: Split Screen */
+.mobile-trade-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mobile-trade-split {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 8px;
+}
+
+.mobile-form-col {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+}
+
+.mobile-book-col {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 10px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.mobile-ob-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #64748b;
+  text-transform: uppercase;
+  padding-bottom: 3px;
+  border-bottom: 1px solid #1e293b;
+  margin-bottom: 3px;
+}
+
+.mobile-ob-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.mobile-ob-row {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 3px;
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.mobile-ob-row:active {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.mobile-ob-mid {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 4px;
+  margin: 2px 0;
+  background: rgba(19, 28, 51, 0.6);
+  border-radius: 4px;
+  border-top: 1px solid #1e293b;
+  border-bottom: 1px solid #1e293b;
+}
+
+.mobile-open-orders-card {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* Mobile Chart View */
+.mobile-chart-tab {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: calc(100vh - 160px);
+  gap: 8px;
+}
+
+.mobile-chart-panel {
+  flex: 1;
+  min-height: 380px;
+  display: flex;
+  flex-direction: column;
+}
+
+.mobile-tv-chart {
+  flex: 1;
+  min-height: 330px;
+  width: 100%;
+}
+
+.mobile-chart-cta-bar {
+  display: flex;
+  gap: 8px;
+  padding: 4px 0;
+  flex-shrink: 0;
+}
+
+.mobile-cta-btn {
+  flex: 1;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s ease;
+}
+
+.mobile-cta-btn.buy {
+  background: #10b981;
+  color: #064e3b;
+}
+
+.mobile-cta-btn.buy:active {
+  filter: brightness(1.15);
+}
+
+.mobile-cta-btn.sell {
+  background: #ef4444;
+  color: #450a0a;
+}
+
+.mobile-cta-btn.sell:active {
+  filter: brightness(1.15);
+}
+
+/* Mobile Orders View */
+.mobile-orders-tab {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: calc(100vh - 160px);
+}
+
+.mobile-orders-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.mobile-order-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.mobile-order-card {
+  background: #131c33;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mobile-order-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.mobile-order-card-body {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.mobile-order-field {
+  display: flex;
+  flex-direction: column;
+}
+
+.mobile-order-field .field-lbl {
+  font-size: 10px;
+  color: #64748b;
+  text-transform: uppercase;
+}
+
+.mobile-order-field .field-val {
+  font-size: 12px;
+  color: #f1f5f9;
+  font-weight: 600;
+}
+
+.mobile-cancel-btn {
+  width: 100%;
+  padding: 6px;
+  font-size: 11px;
+}
+
+.mobile-trade-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mobile-trade-card {
+  background: #131c33;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+/* Screen Breakpoint Rules for Phone & Tablet */
+@media (max-width: 768px) {
+  .mobile-hide {
+    display: none !important;
+  }
+  .clob-wrapper {
+    padding: 8px 8px;
+    height: 100vh;
+    max-height: 100vh;
+    overflow: hidden;
+  }
+  .clob-header {
+    padding: 6px 10px;
+    margin-bottom: 8px;
+    gap: 8px;
+  }
+  .header-left {
+    gap: 8px;
+  }
+  .pair-tab-btn {
+    padding: 4px 10px;
+    font-size: 11px;
+  }
+  .stat-price-white {
+    font-size: 14px;
+  }
+  .stat-change {
+    font-size: 11px;
+  }
+  .wallet-balance-area {
+    padding: 4px 8px;
+    font-size: 11px;
+    gap: 4px;
+  }
+  .withdraw-pill {
+    padding: 2px 6px;
+    font-size: 10px;
+  }
+  input.form-input,
+  input[type="number"],
+  input[type="text"],
+  input[type="password"] {
+    font-size: 16px !important; /* Critical: stops iOS Safari auto-zoom on input tap */
+  }
+  .modal-card {
+    margin: 12px;
+    max-width: calc(100vw - 24px);
+  }
+}
+
+@media (max-width: 960px) and (min-width: 769px) {
   .clob-wrapper {
     height: auto;
     min-height: 100vh;
