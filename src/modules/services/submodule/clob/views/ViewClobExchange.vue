@@ -894,12 +894,12 @@ const showDevMenu = ref<boolean>(false);
 const activeTab = ref<'orders' | 'myTrades'>('orders');
 const orderSide = ref<'buy' | 'sell'>('buy');
 const orderType = ref<string>('Limit');
-const orderPrice = ref<number>(0.005000);
+const orderPrice = ref<number>(0.000076);
 const orderAmount = ref<number | string>('');
 
-const currentPrice = ref<number>(0.005000);
-const high24h = ref<number>(0.005250);
-const low24h = ref<number>(0.004850);
+const currentPrice = ref<number>(0.000076);
+const high24h = ref<number>(0.000080);
+const low24h = ref<number>(0.000072);
 const volume24h = ref<number>(1284000);
 const lastTradeSide = ref<'buy' | 'sell'>('buy');
 const isConnected = ref<boolean>(false);
@@ -1125,23 +1125,25 @@ function switchPair(pair: 'XPX/USDT' | 'XPX/BNB') {
   asks.value = [];
   trades.value = [];
   if (pair === 'XPX/BNB') {
-    currentPrice.value = 0.00000834;
-    orderPrice.value = 0.00000834;
-    high24h.value = 0.00000880;
-    low24h.value = 0.00000790;
-    candleData['1m'] = createSeedCandles(120, 1, 0.00000834, 0.00000010);
-    candleData['5m'] = createSeedCandles(100, 5, 0.00000834, 0.00000020);
-    candleData['15m'] = createSeedCandles(96, 15, 0.00000834, 0.00000040);
-    candleData['1h'] = createSeedCandles(72, 60, 0.00000834, 0.00000080);
+    const bnbSpot = pancakeOracle.value?.priceBnb || 0.00000014;
+    currentPrice.value = bnbSpot;
+    orderPrice.value = bnbSpot;
+    high24h.value = bnbSpot * 1.05;
+    low24h.value = bnbSpot * 0.95;
+    candleData['1m'] = createSeedCandles(120, 1, bnbSpot, bnbSpot * 0.02);
+    candleData['5m'] = createSeedCandles(100, 5, bnbSpot, bnbSpot * 0.03);
+    candleData['15m'] = createSeedCandles(96, 15, bnbSpot, bnbSpot * 0.05);
+    candleData['1h'] = createSeedCandles(72, 60, bnbSpot, bnbSpot * 0.08);
   } else {
-    currentPrice.value = 0.005000;
-    orderPrice.value = 0.005000;
-    high24h.value = 0.005250;
-    low24h.value = 0.004850;
-    candleData['1m'] = createSeedCandles(120, 1, 0.005025, 0.000030);
-    candleData['5m'] = createSeedCandles(100, 5, 0.005025, 0.000065);
-    candleData['15m'] = createSeedCandles(96, 15, 0.005025, 0.000120);
-    candleData['1h'] = createSeedCandles(72, 60, 0.005025, 0.000250);
+    const usdtSpot = pancakeOracle.value?.priceUsdt || 0.000076;
+    currentPrice.value = usdtSpot;
+    orderPrice.value = usdtSpot;
+    high24h.value = usdtSpot * 1.05;
+    low24h.value = usdtSpot * 0.95;
+    candleData['1m'] = createSeedCandles(120, 1, usdtSpot, usdtSpot * 0.02);
+    candleData['5m'] = createSeedCandles(100, 5, usdtSpot, usdtSpot * 0.03);
+    candleData['15m'] = createSeedCandles(96, 15, usdtSpot, usdtSpot * 0.05);
+    candleData['1h'] = createSeedCandles(72, 60, usdtSpot, usdtSpot * 0.08);
   }
   renderChart();
   syncFromNode();
@@ -1283,7 +1285,7 @@ const effectiveOrderPrice = computed(() => {
     const basePrice = orderSide.value === 'buy' ? bestAskPrice.value : bestBidPrice.value;
     return orderSide.value === 'buy' ? basePrice * 1.05 : Math.max(0.000001, basePrice * 0.95);
   }
-  return orderPrice.value || (isBnbPair.value ? 0.00000834 : 0.005000);
+  return orderPrice.value || (isBnbPair.value ? (pancakeOracle.value?.priceBnb || 0.00000014) : (pancakeOracle.value?.priceUsdt || 0.000076));
 });
 
 const maxAskDepth = computed(() => Math.max(...asks.value.map(a => a.amount), 1));
@@ -1396,14 +1398,15 @@ function setOrderPrice(p: number | string | any) {
 }
 
 function useMidPrice() {
-  const bestBid = bids.value.length ? Number(bids.value[0].price || 0) : (isBnbPair.value ? 0.00000830 : 0.005000);
-  const bestAsk = asks.value.length ? Number(asks.value[0].price || 0) : (isBnbPair.value ? 0.00000838 : 0.005050);
+  const spot = isBnbPair.value ? (pancakeOracle.value?.priceBnb || 0.00000014) : (pancakeOracle.value?.priceUsdt || 0.000076);
+  const bestBid = bids.value.length ? Number(bids.value[0].price || 0) : spot * 0.99;
+  const bestAsk = asks.value.length ? Number(asks.value[0].price || 0) : spot * 1.01;
   const mid = (bestBid + bestAsk) / 2;
   orderPrice.value = parseFloat(mid.toFixed(priceDecimals.value));
 }
 
 function setAmountPct(pct: number) {
-  const effectivePrice = effectiveOrderPrice.value || (isBnbPair.value ? 0.00000834 : 0.005000);
+  const effectivePrice = effectiveOrderPrice.value || (isBnbPair.value ? (pancakeOracle.value?.priceBnb || 0.00000014) : (pancakeOracle.value?.priceUsdt || 0.000076));
   if (orderSide.value === 'buy') {
     const totalQuote = (isBnbPair.value ? totalAvailableBnb.value : totalAvailableUsdt.value) * (pct / 100);
     orderAmount.value = Math.max(1, Math.floor(totalQuote / effectivePrice));
@@ -1770,7 +1773,7 @@ async function handleTradeButtonClick() {
 async function submitOrder() {
   if (isSubmitting.value) return;
   const tick = isBnbPair.value ? 0.00000001 : 0.000001;
-  const fallbackMid = currentPrice.value || (isBnbPair.value ? 0.00000834 : 0.005000);
+  const fallbackMid = currentPrice.value || (isBnbPair.value ? (pancakeOracle.value?.priceBnb || 0.00000014) : (pancakeOracle.value?.priceUsdt || 0.000076));
   const marketBuySweep = snapToTick((bestAskPrice.value || fallbackMid) * 1.05, tick);
   const marketSellSweep = snapToTick(Math.max(tick, (bestBidPrice.value || fallbackMid) * 0.95), tick);
   const currentExecPrice = orderType.value === 'Market'
@@ -2045,10 +2048,10 @@ function createSeedCandles(count: number, intervalMinutes: number, targetEndPric
 }
 
 const candleData = reactive<Record<ChartInterval, Candle[]>>({
-  '1m': createSeedCandles(120, 1, 0.005025, 0.000030),
-  '5m': createSeedCandles(100, 5, 0.005025, 0.000065),
-  '15m': createSeedCandles(96, 15, 0.005025, 0.000120),
-  '1h': createSeedCandles(72, 60, 0.005025, 0.000250),
+  '1m': createSeedCandles(120, 1, 0.000076, 0.000002),
+  '5m': createSeedCandles(100, 5, 0.000076, 0.000003),
+  '15m': createSeedCandles(96, 15, 0.000076, 0.000004),
+  '1h': createSeedCandles(72, 60, 0.000076, 0.000006),
 });
 
 const latestCandle = computed(() => {
@@ -2489,6 +2492,9 @@ async function syncFromNode() {
         const pJson = await resPancake.json();
         if (pJson.ok) {
           pancakeOracle.value = pJson;
+          if (!orderPrice.value || orderPrice.value === 0.005 || orderPrice.value === 0.00000834) {
+            orderPrice.value = isBnbPair.value ? pJson.priceBnb : pJson.priceUsdt;
+          }
         }
       }
     } catch (_) {}
