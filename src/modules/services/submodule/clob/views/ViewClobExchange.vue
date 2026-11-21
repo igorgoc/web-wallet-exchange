@@ -55,11 +55,12 @@
 
       <!-- SIRIUS CLOB Brand Badge (Center Empty Space) -->
       <div class="header-center">
-        <div class="sirius-clob-badge" title="SiriusCLOB Decentralized Central Limit Order Book • Powered by ProximaX SuperContract WASM Consensus">
-          <div class="badge-pulse-indicator">
-            <span class="pulse-ring"></span>
-            <span class="pulse-dot"></span>
+        <div class="sirius-clob-badge" title="SiriusCLOB Decentralized Central Limit Order Book • Powered by ProximaX XPX SuperContract WASM Consensus">
+          <div class="badge-xpx-pill">
+            <img src="@/modules/dashboard/img/icon-xpx.svg" alt="XPX" class="badge-xpx-icon" />
+            <span class="badge-xpx-text">XPX</span>
           </div>
+          <div class="badge-divider"></div>
           <div class="badge-content">
             <span class="badge-brand">SIRIUS</span>
             <span class="badge-highlight">CLOB</span>
@@ -2312,61 +2313,61 @@ onUnmounted(() => {
 .sirius-clob-badge {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 12px 5px 9px;
-  background: linear-gradient(135deg, rgba(14, 27, 21, 0.85) 0%, rgba(9, 18, 14, 0.95) 100%);
-  border: 1px solid rgba(16, 185, 129, 0.24);
+  gap: 10px;
+  padding: 4px 14px 4px 6px;
+  background: linear-gradient(135deg, rgba(14, 28, 22, 0.88) 0%, rgba(8, 17, 13, 0.96) 100%);
+  border: 1px solid rgba(16, 185, 129, 0.28);
   border-radius: 9999px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35), 0 0 12px rgba(16, 185, 129, 0.08);
-  transition: all 0.25s ease;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(8px);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   user-select: none;
   cursor: default;
 }
 
 .sirius-clob-badge:hover {
-  border-color: rgba(16, 185, 129, 0.48);
-  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.45), 0 0 18px rgba(16, 185, 129, 0.16);
+  border-color: rgba(16, 185, 129, 0.55);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45), 0 0 16px rgba(16, 185, 129, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.14);
   transform: translateY(-1px);
 }
 
-.badge-pulse-indicator {
-  position: relative;
-  width: 8px;
-  height: 8px;
-  display: flex;
+.badge-xpx-pill {
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: 5px;
+  padding: 3px 8px 3px 6px;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.22) 0%, rgba(5, 150, 105, 0.16) 100%);
+  border: 1px solid rgba(16, 185, 129, 0.38);
+  border-radius: 9999px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
 }
 
-.pulse-ring {
-  position: absolute;
+.badge-xpx-icon {
   width: 14px;
   height: 14px;
-  border-radius: 50%;
-  background: rgba(16, 185, 129, 0.4);
-  animation: badge-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+  display: block;
+  flex-shrink: 0;
 }
 
-.pulse-dot {
-  position: relative;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #10b981;
-  box-shadow: 0 0 6px #10b981;
+.badge-xpx-text {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #34d399;
+  line-height: 1;
 }
 
-@keyframes badge-ping {
-  75%, 100% {
-    transform: scale(2.2);
-    opacity: 0;
-  }
+.badge-divider {
+  width: 1px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.14);
+  flex-shrink: 0;
 }
 
 .badge-content {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   font-family: inherit;
   font-size: 13px;
   letter-spacing: 0.06em;
@@ -2375,12 +2376,13 @@ onUnmounted(() => {
 }
 
 .badge-brand {
-  color: #f1f5f9;
+  color: #f8fafc;
   font-weight: 800;
+  letter-spacing: 0.04em;
 }
 
 .badge-highlight {
-  background: linear-gradient(135deg, #10b981 0%, #34d399 50%, #38bdf8 100%);
+  background: linear-gradient(135deg, #10b981 0%, #34d399 45%, #38bdf8 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   font-weight: 800;
@@ -2389,22 +2391,23 @@ onUnmounted(() => {
 .badge-sub {
   font-size: 10px;
   color: #94a3b8;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: 0.08em;
-  padding: 1px 4px;
+  padding: 2px 6px;
   background: rgba(255, 255, 255, 0.06);
-  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9999px;
 }
 
 .badge-chip {
-  font-size: 9px;
+  font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   font-weight: 700;
-  color: #34d399;
-  background: rgba(16, 185, 129, 0.12);
-  border: 1px solid rgba(16, 185, 129, 0.25);
-  padding: 2px 7px;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  padding: 3px 9px;
   border-radius: 9999px;
 }
 
