@@ -93,10 +93,10 @@
           </button>
 
           <div v-if="showDevMenu" class="dev-dropdown-popover" @click.stop>
-            <div class="dev-dropdown-item" @click="claimFaucet(); showDevMenu = false">
+            <div v-if="getActiveNetworkId() !== 184 && isFaucetSupported" class="dev-dropdown-item" @click="claimFaucet(); showDevMenu = false">
               <span class="dev-item-icon">💧</span>
               <div>
-                <div class="dev-item-title">Claim On-Chain Faucet</div>
+                <div class="dev-item-title">Claim On-Chain Faucet (Testnet)</div>
                 <div class="dev-item-sub">+10 XPX, +50 USDT &amp; +0.05 BNB</div>
               </div>
             </div>
@@ -633,7 +633,18 @@ const getClobApiBase = () => {
 };
 const CLOB_API_BASE = getClobApiBase();
 const router = useRouter();
-const SUPERCONTRACT_ADDRESS = 'VAEKLE3WB6XJLFW75JGJJ7Y3DVQWCWX774DDSJ2F';
+
+// Dynamic exchange network parameters (auto-synced with backend /api/clob/config)
+const dynamicVaultAddress = ref<string>('VAEKLE3WB6XJLFW75JGJJ7Y3DVQWCWX774DDSJ2F');
+const isFaucetSupported = ref<boolean>(true);
+const SUPERCONTRACT_ADDRESS = computed(() => {
+  if (dynamicVaultAddress.value && dynamicVaultAddress.value.length === 40) {
+    return dynamicVaultAddress.value;
+  }
+  return getActiveNetworkId() === 184
+    ? 'XAEKLE3WB6XJLFW75JGJJ7Y3DVQWCWX775NQNWPP'
+    : 'VAEKLE3WB6XJLFW75JGJJ7Y3DVQWCWX774DDSJ2F';
+});
 const TESTNET2_VAULT_ADDRESS = SUPERCONTRACT_ADDRESS;
 
 // --- State & Types ---
@@ -884,7 +895,7 @@ async function fetchOnChainBalances() {
       const data = await res.json();
       const mosaics = data.account?.mosaics || [];
       const isMainnet = getActiveNetworkId() === 184;
-      const xpxHex = isMainnet ? '402B2F579FA859B8' : '13BFC518E40549D7';
+      const xpxHex = isMainnet ? '402B2F579FAEBC59' : '13BFC518E40549D7';
       const usdtHex = isMainnet ? '7525381A171D1E44' : '4430AEFEF7E15D0C';
       const bnbHex = isMainnet ? '1E5C5FADEC7B34DD' : '3CC1D3CE7447B6F9';
 
@@ -1029,6 +1040,15 @@ function handleApiError(res: Response, data: any, defaultTitle = 'Operation Fail
 const isClaimingFaucet = ref<boolean>(false);
 
 async function claimFaucet() {
+  if (getActiveNetworkId() === 184 || !isFaucetSupported.value) {
+    showToast(
+      'Mainnet Active',
+      'Faucet is permanently disabled on Sirius Mainnet. Real funds must be transferred to your wallet.',
+      'warning',
+      5000
+    );
+    return;
+  }
   const pubKey = activeAccount.value?.publicKey;
   const addr = activeAccount.value?.address;
   if (!pubKey && !addr) {
@@ -1265,7 +1285,8 @@ let sessionTimer: any = null;
 function setTradingSessionKey(priv: string) {
   sessionTradingPrivateKey.value = priv;
   const rawAddr = (activeAccount.value?.address || '').replace(/[- ]/g, '').toUpperCase();
-  if (rawAddr) {
+  // ONLY persist to browser storage on Testnet for local convenience; strictly prohibited on Mainnet!
+  if (rawAddr && getActiveNetworkId() !== 184) {
     sessionStorage.setItem('_clob_testnet_key_' + rawAddr, priv);
     localStorage.setItem('_clob_testnet_key_' + rawAddr, priv);
   }
@@ -2212,8 +2233,22 @@ async function syncFromNode() {
   }
 }
 
+async function fetchClobConfig() {
+  try {
+    const res = await fetch(`${CLOB_API_BASE}/api/clob/config`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.ok) {
+        if (data.vaultAddress) dynamicVaultAddress.value = data.vaultAddress;
+        if (typeof data.faucetEnabled === 'boolean') isFaucetSupported.value = data.faucetEnabled;
+      }
+    }
+  } catch (_) {}
+}
+
 onMounted(() => {
   initTradingViewChart();
+  fetchClobConfig();
   syncFromNode();
   pollTimer = setInterval(syncFromNode, 3000);
 });
