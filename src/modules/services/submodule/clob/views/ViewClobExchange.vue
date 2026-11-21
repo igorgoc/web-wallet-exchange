@@ -79,6 +79,9 @@
           <span class="bal-sep">•</span>
           <span v-if="isBnbPair" class="bal-val text-emerald-400" title="Tradeable BNB">{{ totalAvailableBnb.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 }) }} BNB</span>
           <span v-else class="bal-val text-emerald-400" title="Tradeable USDT">${{ totalAvailableUsdt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} USDT</span>
+          <button class="withdraw-pill ml-2" @click="openWithdrawModal" title="Withdraw funds from CLOB Vault to L1 wallet">
+            Withdraw
+          </button>
         </div>
 
         <!-- Dev & Tools Menu Popover (...) -->
@@ -564,6 +567,110 @@
           <button class="btn-cancel" @click="showPasswordModal = false">Cancel</button>
           <button class="btn-confirm-deposit" @click="unlockTradingSession">
             Unlock
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Withdrawal Modal with Network Fee & Net Received Transparency -->
+    <div v-if="showWithdrawModal" class="modal-overlay" @click.self="showWithdrawModal = false">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div class="modal-title">
+            <span class="modal-icon">💸</span>
+            <div>
+              <h3>Withdraw to Sirius Wallet</h3>
+              <p class="modal-subtitle">Transfer funds from CLOB Vault to your on-chain Sirius account</p>
+            </div>
+          </div>
+          <button class="modal-close-btn" @click="showWithdrawModal = false">✕</button>
+        </div>
+
+        <div class="modal-body">
+          <!-- Select Asset -->
+          <div class="form-group mb-3">
+            <label class="modal-label">Select Asset</label>
+            <div class="flex gap-2">
+              <button 
+                type="button" 
+                class="pct-btn flex-1" 
+                :class="{ active: withdrawAsset === 'XPX' }" 
+                @click="withdrawAsset = 'XPX'"
+              >
+                XPX ({{ (userXpxBalance || 0).toFixed(2) }})
+              </button>
+              <button 
+                type="button" 
+                class="pct-btn flex-1" 
+                :class="{ active: withdrawAsset === 'USDT' }" 
+                @click="withdrawAsset = 'USDT'"
+              >
+                USDT ({{ (userUsdtBalance || 0).toFixed(2) }})
+              </button>
+              <button 
+                type="button" 
+                class="pct-btn flex-1" 
+                :class="{ active: withdrawAsset === 'BNB' }" 
+                @click="withdrawAsset = 'BNB'"
+              >
+                BNB ({{ (userBnbBalance || 0).toFixed(4) }})
+              </button>
+            </div>
+          </div>
+
+          <!-- Amount Input -->
+          <div class="form-group mb-3">
+            <div class="flex justify-between items-center mb-1">
+              <label class="modal-label">Withdrawal Amount</label>
+              <span class="text-xs text-slate-400 font-mono">
+                Min: &gt; {{ withdrawalNetworkFee }} {{ withdrawAsset }}
+              </span>
+            </div>
+            <div class="input-box">
+              <input 
+                type="number" 
+                v-model="withdrawAmount" 
+                step="any" 
+                placeholder="0.00" 
+                class="form-input font-mono"
+              />
+              <span class="unit">{{ withdrawAsset }}</span>
+            </div>
+            <div class="pct-grid mt-2">
+              <button v-for="pct in [25, 50, 75, 100]" :key="pct" class="pct-btn" @click="setWithdrawPct(pct)">
+                {{ pct }}%
+              </button>
+            </div>
+          </div>
+
+          <!-- Network Fee & Net Received Breakdown -->
+          <div class="summary-box mb-3 font-mono text-xs">
+            <div class="summary-row">
+              <span class="text-slate-400">Network Withdrawal Fee</span>
+              <span class="text-amber-400 font-semibold">{{ withdrawalNetworkFee }} {{ withdrawAsset }}</span>
+            </div>
+            <div class="summary-row">
+              <span class="text-slate-400">Net You Will Receive</span>
+              <span class="text-emerald-400 font-bold">{{ netWithdrawAmount > 0 ? (withdrawAsset === 'BNB' ? netWithdrawAmount.toFixed(4) : netWithdrawAmount.toFixed(2)) : '0.00' }} {{ withdrawAsset }}</span>
+            </div>
+            <div class="summary-row">
+              <span class="text-slate-400">Recipient Account</span>
+              <span class="text-slate-300">{{ activeAccount ? shortAddress(activeAccount.address) : '—' }}</span>
+            </div>
+          </div>
+
+          <p v-if="withdrawError" class="text-xs text-rose-400 font-medium mb-2">{{ withdrawError }}</p>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn-cancel" @click="showWithdrawModal = false">Cancel</button>
+          <button 
+            class="btn-confirm-withdraw" 
+            :disabled="isWithdrawing || !isWithdrawValid" 
+            @click="executeWithdraw"
+          >
+            <span v-if="isWithdrawing">Processing Withdrawal...</span>
+            <span v-else>Confirm &amp; Withdraw</span>
           </button>
         </div>
       </div>
@@ -1440,6 +1547,9 @@ function unlockTradingSession() {
     } else if (pendingAction.value === 'flushBatch') {
       pendingAction.value = null;
       flushBatchSettlement();
+    } else if (pendingAction.value === 'withdraw') {
+      pendingAction.value = null;
+      executeWithdraw();
     }
   } catch (err: any) {
     passwordError.value = 'Incorrect wallet password. Please verify your password.';
@@ -1449,6 +1559,130 @@ function unlockTradingSession() {
 
 const isSubmitting = ref(false);
 const isFlushingBatch = ref(false);
+
+// Withdrawal State & Operations
+const showWithdrawModal = ref<boolean>(false);
+const withdrawAsset = ref<'XPX' | 'USDT' | 'BNB'>('XPX');
+const withdrawAmount = ref<string>('');
+const isWithdrawing = ref<boolean>(false);
+const withdrawError = ref<string>('');
+
+const withdrawalNetworkFee = computed(() => {
+  if (withdrawAsset.value === 'BNB') return 0.001;
+  return 1.0;
+});
+
+const netWithdrawAmount = computed(() => {
+  const amt = parseFloat(withdrawAmount.value) || 0;
+  const fee = withdrawalNetworkFee.value;
+  return Math.max(0, amt - fee);
+});
+
+const isWithdrawValid = computed(() => {
+  const amt = parseFloat(withdrawAmount.value);
+  if (isNaN(amt) || amt <= withdrawalNetworkFee.value) return false;
+  const maxAvail = withdrawAsset.value === 'XPX'
+    ? userXpxBalance.value
+    : withdrawAsset.value === 'USDT'
+      ? userUsdtBalance.value
+      : userBnbBalance.value;
+  return amt <= maxAvail;
+});
+
+function openWithdrawModal() {
+  withdrawError.value = '';
+  withdrawAmount.value = '';
+  showWithdrawModal.value = true;
+}
+
+function setWithdrawPct(pct: number) {
+  const maxAvail = withdrawAsset.value === 'XPX'
+    ? userXpxBalance.value
+    : withdrawAsset.value === 'USDT'
+      ? userUsdtBalance.value
+      : userBnbBalance.value;
+  const val = (maxAvail * pct) / 100;
+  withdrawAmount.value = (withdrawAsset.value === 'BNB' ? val.toFixed(4) : val.toFixed(2));
+}
+
+async function executeWithdraw() {
+  if (isWithdrawing.value) return;
+  const amt = parseFloat(withdrawAmount.value);
+  const fee = withdrawalNetworkFee.value;
+  if (isNaN(amt) || amt <= fee) {
+    withdrawError.value = `Withdrawal amount must be strictly greater than network fee (${fee} ${withdrawAsset.value})`;
+    return;
+  }
+  const maxAvail = withdrawAsset.value === 'XPX'
+    ? userXpxBalance.value
+    : withdrawAsset.value === 'USDT'
+      ? userUsdtBalance.value
+      : userBnbBalance.value;
+  if (amt > maxAvail) {
+    withdrawError.value = `Requested amount exceeds available balance (${maxAvail.toFixed(2)} ${withdrawAsset.value})`;
+    return;
+  }
+
+  const signer = getSignerAccount();
+  if (!signer) {
+    pendingAction.value = 'withdraw';
+    showPasswordModal.value = true;
+    passwordError.value = '';
+    return;
+  }
+
+  isWithdrawing.value = true;
+  withdrawError.value = '';
+  const now = Date.now();
+  const nonce = generateSecureNonce(now);
+  const expiry = now + PASSWORD_EXPIRY_MS;
+  const netId = getActiveNetworkId();
+  const cleanAddr = (activeAccount.value?.address || '').replace(/[- ]/g, '').toUpperCase();
+  const formattedAmt = withdrawAsset.value === 'BNB' ? amt.toFixed(6) : amt.toFixed(6);
+  const withdrawMsg = `${netId}:SiriusCLOB-v1:WITHDRAW:${withdrawAsset.value}:${formattedAmt}:${cleanAddr}:${nonce}:${expiry}`;
+  const signature = signer.signData(withdrawMsg);
+
+  try {
+    const res = await fetch(`${CLOB_API_BASE}/api/clob/withdraw`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        asset: withdrawAsset.value,
+        mosaic: withdrawAsset.value,
+        amount: formattedAmt,
+        recipient: cleanAddr,
+        publicKey: signer.publicKey,
+        nonce,
+        expiry,
+        signature,
+      }),
+    });
+
+    const data = await res.json();
+    if (data.ok) {
+      if (data.balances) {
+        applyBalances(data.balances);
+      }
+      showToast(
+        'Withdrawal Broadcast',
+        `Withdrew ${formattedAmt} ${withdrawAsset.value}. Net received: ${data.netPayout || (amt - fee).toFixed(2)} ${withdrawAsset.value} (${fee} ${withdrawAsset.value} network fee deducted).`,
+        'success',
+        6000
+      );
+      showWithdrawModal.value = false;
+      withdrawAmount.value = '';
+      syncFromNode().catch(() => {});
+    } else {
+      withdrawError.value = data.error || 'Withdrawal failed';
+      showToast('Withdrawal Failed', data.error || 'Server rejected withdrawal', 'error');
+    }
+  } catch (err: any) {
+    withdrawError.value = err.message || 'Network error';
+    showToast('Withdrawal Error', err.message || 'Failed to submit withdrawal', 'error');
+  } finally {
+    isWithdrawing.value = false;
+  }
+}
 
 function generateSecureNonce(now = Date.now()): string {
   if (typeof window !== 'undefined' && window.crypto && window.crypto.getRandomValues) {
