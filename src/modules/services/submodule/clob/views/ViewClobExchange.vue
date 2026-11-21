@@ -968,6 +968,9 @@ function saveBalances() {
 function switchPair(pair: 'XPX/USDT' | 'XPX/BNB') {
   if (selectedPair.value === pair) return;
   selectedPair.value = pair;
+  bids.value = [];
+  asks.value = [];
+  trades.value = [];
   if (pair === 'XPX/BNB') {
     currentPrice.value = 0.00000834;
     orderPrice.value = 0.00000834;
@@ -2107,22 +2110,20 @@ async function syncFromNode() {
     if (res.ok) {
       const data = await res.json();
       isConnected.value = true;
-      if (data && (data.bids?.length > 0 || data.asks?.length > 0)) {
-        bids.value = (data.bids || []).map((b: any, idx: number) => ({
-          price: b.price / 100_000_000,
-          amount: b.total_depth / 1_000_000,
-          total: (b.price / 100_000_000) * (b.total_depth / 1_000_000),
-          orderId: 100 + idx,
-          owner: 'On-Chain'
-        }));
-        asks.value = (data.asks || []).map((a: any, idx: number) => ({
-          price: a.price / 100_000_000,
-          amount: a.total_depth / 1_000_000,
-          total: (a.price / 100_000_000) * (a.total_depth / 1_000_000),
-          orderId: 200 + idx,
-          owner: 'On-Chain'
-        }));
-      }
+      bids.value = (data?.bids || []).map((b: any, idx: number) => ({
+        price: b.price / 100_000_000,
+        amount: b.total_depth / 1_000_000,
+        total: (b.price / 100_000_000) * (b.total_depth / 1_000_000),
+        orderId: 100 + idx,
+        owner: 'On-Chain'
+      }));
+      asks.value = (data?.asks || []).map((a: any, idx: number) => ({
+        price: a.price / 100_000_000,
+        amount: a.total_depth / 1_000_000,
+        total: (a.price / 100_000_000) * (a.total_depth / 1_000_000),
+        orderId: 200 + idx,
+        owner: 'On-Chain'
+      }));
     } else {
       isConnected.value = false;
     }
@@ -2131,7 +2132,7 @@ async function syncFromNode() {
     const resTrades = await fetch(`${CLOB_API_BASE}/api/clob/trades?pair=${pairParam}`);
     if (resTrades.ok) {
       const tradeData = await resTrades.json();
-      if (Array.isArray(tradeData) && tradeData.length > 0) {
+      if (Array.isArray(tradeData)) {
         trades.value = tradeData.slice().reverse().map((t: any, idx: number) => {
           const price = t.price / 100_000_000;
           const amount = t.base_amount / 1_000_000;
