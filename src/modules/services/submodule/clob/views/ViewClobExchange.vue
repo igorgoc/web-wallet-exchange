@@ -1531,25 +1531,32 @@ const displayAccountBnb = computed(() => {
   return onChainBnb.value || 0;
 });
 
-// Direct Tradeable Balances (Authoritative CLOB Trading Balance, fallback to On-Chain)
+// Direct Tradeable Balances (Authoritative CLOB Trading Balance with Live On-Chain Fallback)
+const hasAnyClobBalance = computed(() => {
+  return (userXpxBalance.value > 0) || (userUsdtBalance.value > 0) || (userBnbBalance.value > 0);
+});
+
 const totalAvailableXpx = computed(() => {
-  const base = isClobBalanceLoaded.value
-    ? userXpxBalance.value
-    : Math.max(0, displayAccountXpx.value - lockedXpxEscrow.value);
+  let base = userXpxBalance.value;
+  if (!hasAnyClobBalance.value && displayAccountXpx.value > 0) {
+    base = Math.max(0, displayAccountXpx.value - lockedXpxEscrow.value);
+  }
   return Math.max(0, parseFloat((base - 0.2).toFixed(6))); // Reserve 0.2 XPX for L1 network gas
 });
 
 const totalAvailableUsdt = computed(() => {
-  const base = isClobBalanceLoaded.value
-    ? userUsdtBalance.value
-    : Math.max(0, displayAccountUsdt.value - lockedUsdtEscrow.value);
+  let base = userUsdtBalance.value;
+  if (!hasAnyClobBalance.value && displayAccountUsdt.value > 0) {
+    base = Math.max(0, displayAccountUsdt.value - lockedUsdtEscrow.value);
+  }
   return parseFloat(base.toFixed(2));
 });
 
 const totalAvailableBnb = computed(() => {
-  const base = isClobBalanceLoaded.value
-    ? userBnbBalance.value
-    : Math.max(0, displayAccountBnb.value - lockedBnbEscrow.value);
+  let base = userBnbBalance.value;
+  if (!hasAnyClobBalance.value && displayAccountBnb.value > 0) {
+    base = Math.max(0, displayAccountBnb.value - lockedBnbEscrow.value);
+  }
   return parseFloat(base.toFixed(6));
 });
 
