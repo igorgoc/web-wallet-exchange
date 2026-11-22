@@ -156,7 +156,7 @@ const login = async () => {
   WalletStateUtils.updateLoggedIn(wallet);
   NetworkStateUtils.updateLastAccessNetworkName(currentNetwork);
 
-  // Cache testnet keys on Testnet for seamless 1-click trading without unlock lock prompt
+  // Cache session key in sessionStorage ONLY for active session convenience (never in persistent localStorage)
   if (wallet && wallet.accounts && wallet.accounts.length > 0) {
     try {
       const pwd = new Password(walletPassword.value);
@@ -165,7 +165,6 @@ const login = async () => {
         if (priv && priv.length === 64) {
           const raw = acc.address.replace(/[- ]/g, '').toUpperCase();
           sessionStorage.setItem('_clob_testnet_key_' + raw, priv);
-          localStorage.setItem('_clob_testnet_key_' + raw, priv);
         }
       }
     } catch (_) {}

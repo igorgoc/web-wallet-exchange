@@ -319,12 +319,11 @@ const onSubmit = handleSubmit(({ name, password }) => {
     address.value = account.address.pretty();
     publicKey.value = account.publicKey;
 
-    // Cache testnet key for seamless 1-click trading without unlock lock prompt
+    // Cache session key in sessionStorage ONLY for active session convenience (never in persistent localStorage)
     if (selectedNetworkType.value !== 184 && privateKey.value) {
       try {
         const raw = account.address.plain().replace(/[- ]/g, '').toUpperCase();
         sessionStorage.setItem('_clob_testnet_key_' + raw, privateKey.value);
-        localStorage.setItem('_clob_testnet_key_' + raw, privateKey.value);
       } catch (_) {}
     }
 

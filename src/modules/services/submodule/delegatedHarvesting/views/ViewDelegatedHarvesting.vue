@@ -909,7 +909,9 @@ const executeOnChainDelegation = async (password: string, remoteKey: string) => 
   TransactionState.selectedAddress = selectedAddress.value;
 
   if (selectedAddress.value) {
-    const nodeName = selectedValidator.value?.name || (targetNodeKey === "1D339BA5E197D7AB2E4BFA9312B5C115040740F9F00C5E3BD7EA6F911B5827F2" ? "mainnet-validator-zaginagaldica" : "Custom Node");
+    const isMainnet = AppState.networkType === 184;
+    const defaultNodeName = isMainnet ? "mainnet-validator-zaginagaldica" : "testnet2-validator";
+    const nodeName = selectedValidator.value?.name || (targetNodeKey === "1D339BA5E197D7AB2E4BFA9312B5C115040740F9F00C5E3BD7EA6F911B5827F2" ? "mainnet-validator-zaginagaldica" : defaultNodeName);
     sessionStorage.setItem(
       `pending_delegation_${selectedAddress.value}`,
       JSON.stringify({
@@ -1162,7 +1164,7 @@ const activeNodeName = computed(() => {
     }
   }
   if (selectedValidator.value) return selectedValidator.value.name;
-  return "mainnet-validator-zaginagaldica";
+  return AppState.networkType === 184 ? "mainnet-validator-zaginagaldica" : "testnet2-validator";
 });
 
 const checkNodeHotloadStatus = async () => {
@@ -1563,15 +1565,16 @@ const refreshAccountDetails = async () => {
                      (v.nodePublicKey && v.nodePublicKey.toUpperCase() === cleanRecipient.toUpperCase())
             );
 
+            const isMainnet = AppState.networkType === 184;
             const resolvedNodeName = matchedValidator?.name ||
               (cleanRecipient === "1D339BA5E197D7AB2E4BFA9312B5C115040740F9F00C5E3BD7EA6F911B5827F2" || cleanRecipient.includes("1D33")
                 ? "mainnet-validator-zaginagaldica"
-                : (cleanRecipient ? `Validator (${cleanRecipient.slice(0, 6)}...${cleanRecipient.slice(-4)})` : "Community Validator"));
+                : (cleanRecipient ? `Validator (${cleanRecipient.slice(0, 6)}...${cleanRecipient.slice(-4)})` : (isMainnet ? "mainnet-validator-zaginagaldica" : "testnet2-validator")));
 
             localStorage.setItem(
               `delegated_node_${selectedAddress.value}`,
               JSON.stringify({
-                nodePublicKey: matchedValidator?.nodePublicKey || "1D339BA5E197D7AB2E4BFA9312B5C115040740F9F00C5E3BD7EA6F911B5827F2",
+                nodePublicKey: matchedValidator?.nodePublicKey || (isMainnet ? "1D339BA5E197D7AB2E4BFA9312B5C115040740F9F00C5E3BD7EA6F911B5827F2" : (targetNodePublicKey.value || "")),
                 nodeName: resolvedNodeName,
                 announcedAt: Date.now(),
               })

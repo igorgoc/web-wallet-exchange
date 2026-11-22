@@ -29,9 +29,39 @@ export class WalletStateUtils {
     walletState.currentLoggedInWallet = null;
     walletState.isLogin = false;
     sessionStorage.removeItem(sessionWalletKey);
-    sessionStorage.removeItem("allFailedTransactions")
+    sessionStorage.removeItem("allFailedTransactions");
     sessionStorage.removeItem("notification");
     sessionStorage.removeItem("defaultAcc");
+    sessionStorage.removeItem("_session_auth_salt");
+    try {
+      const purge = (storage: Storage) => {
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < storage.length; i++) {
+          const k = storage.key(i);
+          if (k && (k.startsWith('_clob_') || k.startsWith('clob_'))) {
+            keysToRemove.push(k);
+          }
+        }
+        keysToRemove.forEach((k) => storage.removeItem(k));
+      };
+      if (typeof sessionStorage !== "undefined") purge(sessionStorage);
+      if (typeof localStorage !== "undefined") purge(localStorage);
+    } catch (_) {}
+  }
+
+  static purgeStorageKeys(): void {
+    try {
+      if (typeof localStorage !== "undefined") {
+        const toRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && (k.startsWith('_clob_testnet_key_') || k.startsWith('_clob_key_'))) {
+            toRemove.push(k);
+          }
+        }
+        toRemove.forEach((k) => localStorage.removeItem(k));
+      }
+    } catch (_) {}
   }
 
   static async checkFromSession(): Promise<boolean> {
@@ -44,11 +74,15 @@ export class WalletStateUtils {
       if (!verifiableToken || typeof verifiableToken == "string") {
         throw new Error("Service unavailable");
       }
+      const storedSalt = sessionStorage.getItem("_session_auth_salt");
+      if (!storedSalt || storedSalt !== verifiableToken.salt) {
+        return false;
+      }
       const isValid = await WalletSessionToken.verify(
         sessionWalletToken,
         verifiableToken.name,
         sessionNetworkName,
-        verifiableToken.salt
+        storedSalt
       );
       const passToken = verifiableToken;
       if (isValid && passToken) {
@@ -130,7 +164,12 @@ class WalletSessionToken {
   }
 
   static async create(walletName: string, networkName: string): Promise<string> {
-    const salt = WalletSessionToken.genToken(10);
+    const salt = WalletSessionToken.genToken(32);
+    try {
+      if (typeof sessionStorage !== "undefined") {
+        sessionStorage.setItem("_session_auth_salt", salt);
+      }
+    } catch (_) {}
 
     const verifiableToken = {
       name: walletName,

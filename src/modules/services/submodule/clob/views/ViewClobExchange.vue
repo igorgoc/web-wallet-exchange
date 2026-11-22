@@ -503,7 +503,7 @@
             </div>
             <div class="summary-row">
               <span class="text-slate-400">Est. Fee</span>
-              <span class="font-mono text-slate-200">{{ estimatedFeeInUsdt }}</span>
+              <span class="font-mono text-slate-200">{{ estimatedFeeDisplay }}</span>
             </div>
           </div>
 
@@ -1216,6 +1216,7 @@ import { walletState } from '@/state/walletState';
 import { networkState } from '@/state/networkState';
 import { Account, Password } from 'tsjs-xpx-chain-sdk';
 import { WalletUtils } from '@/util/walletUtils';
+import { WalletStateUtils } from '@/state/utils/walletStateUtils';
 import {
   createChart,
   ColorType,
@@ -1714,20 +1715,20 @@ function switchPair(pair: 'XPX/USDT' | 'XPX/BNB') {
     orderPrice.value = bnbSpot;
     high24h.value = bnbSpot * 1.05;
     low24h.value = bnbSpot * 0.95;
-    candleData['1m'] = createSeedCandles(120, 1, bnbSpot, bnbSpot * 0.02);
-    candleData['5m'] = createSeedCandles(100, 5, bnbSpot, bnbSpot * 0.03);
-    candleData['15m'] = createSeedCandles(96, 15, bnbSpot, bnbSpot * 0.05);
-    candleData['1h'] = createSeedCandles(72, 60, bnbSpot, bnbSpot * 0.08);
+    candleData['1m'] = createSeedCandles(120, 1, bnbSpot);
+    candleData['5m'] = createSeedCandles(100, 5, bnbSpot);
+    candleData['15m'] = createSeedCandles(96, 15, bnbSpot);
+    candleData['1h'] = createSeedCandles(72, 60, bnbSpot);
   } else {
     const usdtSpot = pancakeOracle.value?.priceUsdt || 0.000076;
     currentPrice.value = usdtSpot;
     orderPrice.value = usdtSpot;
     high24h.value = usdtSpot * 1.05;
     low24h.value = usdtSpot * 0.95;
-    candleData['1m'] = createSeedCandles(120, 1, usdtSpot, usdtSpot * 0.02);
-    candleData['5m'] = createSeedCandles(100, 5, usdtSpot, usdtSpot * 0.03);
-    candleData['15m'] = createSeedCandles(96, 15, usdtSpot, usdtSpot * 0.05);
-    candleData['1h'] = createSeedCandles(72, 60, usdtSpot, usdtSpot * 0.08);
+    candleData['1m'] = createSeedCandles(120, 1, usdtSpot);
+    candleData['5m'] = createSeedCandles(100, 5, usdtSpot);
+    candleData['15m'] = createSeedCandles(96, 15, usdtSpot);
+    candleData['1h'] = createSeedCandles(72, 60, usdtSpot);
   }
   renderChart();
   syncFromNode();
@@ -1930,18 +1931,23 @@ const hasWalletFundsForDeposit = computed(() => {
 
 
 
-// Estimated Fee in USDT
-const estimatedFeeInUsdt = computed(() => {
+// Estimated Fee Display (XPX for Buy, Quote asset for Sell)
+const estimatedFeeDisplay = computed(() => {
   const amt = Number(orderAmount.value) || 0;
-  if (amt <= 0) return '0.0000 USDT';
+  const isBuy = orderSide.value === 'buy' || orderSide.value === 'Buy';
+  const feeAsset = isBuy ? baseSymbol.value : quoteSymbol.value;
+  if (amt <= 0) return `0.0000 ${feeAsset}`;
   if (orderType.value === 'Limit') {
-    return '0.0000 USDT (Maker)';
+    return `0.0000 ${feeAsset} (Maker)`;
   }
-  const quoteVal = amt * effectiveOrderPrice.value;
-  if (isBnbPair.value) {
-    return (quoteVal * 0.001 * 600).toFixed(4) + ' USDT (0.10%)';
+  if (isBuy) {
+    // 0.10% taker fee charged in received base asset (XPX)
+    return (amt * 0.001).toFixed(4) + ` ${baseSymbol.value} (0.10%)`;
+  } else {
+    // 0.10% taker fee charged in received quote asset (USDT or BNB)
+    const quoteVal = amt * effectiveOrderPrice.value;
+    return (quoteVal * 0.001).toFixed(4) + ` ${quoteSymbol.value} (0.10%)`;
   }
-  return (quoteVal * 0.001).toFixed(4) + ' USDT (0.10%)';
 });
 
 // User's own executed fills from trade stream
@@ -2008,29 +2014,25 @@ const showPasswordModal = ref<boolean>(false);
 const pendingAction = ref<string | null>(null);
 const pendingOrderId = ref<number | null>(null);
 
-// 20-minute Password Session Timeout (1,200,000 ms)
+// 20-minute Inactivity Session Timeout (1,200,000 ms) across all networks
 const PASSWORD_EXPIRY_MS = 20 * 60 * 1000;
 let sessionTimer: any = null;
 
 function setTradingSessionKey(priv: string) {
   sessionTradingPrivateKey.value = priv;
   const rawAddr = (activeAccount.value?.address || '').replace(/[- ]/g, '').toUpperCase();
-  // ONLY persist to browser storage on Testnet for local convenience; strictly prohibited on Mainnet!
-  if (rawAddr && getActiveNetworkId() !== 184) {
+  // Persist strictly to sessionStorage for page reloads during active browser session (never in persistent localStorage)
+  if (rawAddr) {
     sessionStorage.setItem('_clob_testnet_key_' + rawAddr, priv);
-    localStorage.setItem('_clob_testnet_key_' + rawAddr, priv);
   }
-  // Only enforce 20-minute session expiration on Mainnet
-  if (getActiveNetworkId() === 184) {
-    if (sessionTimer) {
-      clearTimeout(sessionTimer);
-    }
-    sessionTimer = setTimeout(() => {
-      sessionTradingPrivateKey.value = null;
-      sessionTimer = null;
-      showToast('Trading Session Expired', 'Password session expired after 20 minutes. Please enter password to trade again.', 'info', 4000);
-    }, PASSWORD_EXPIRY_MS);
+  // Enforce 20-minute inactivity session expiration across all networks
+  if (sessionTimer) {
+    clearTimeout(sessionTimer);
   }
+  sessionTimer = setTimeout(() => {
+    lockTradingSession();
+    showToast('Trading Session Expired', 'Session expired after 20 minutes of inactivity. Please enter password to trade again.', 'info', 4000);
+  }, PASSWORD_EXPIRY_MS);
 }
 
 function lockTradingSession() {
@@ -2038,6 +2040,10 @@ function lockTradingSession() {
   if (sessionTimer) {
     clearTimeout(sessionTimer);
     sessionTimer = null;
+  }
+  const rawAddr = (activeAccount.value?.address || '').replace(/[- ]/g, '').toUpperCase();
+  if (rawAddr) {
+    sessionStorage.removeItem('_clob_testnet_key_' + rawAddr);
   }
 }
 
@@ -2084,33 +2090,17 @@ function getSignerAccount(): any {
     }
   }
 
-  // On Testnet (Network 168), seamlessly resolve stored testnet key without password prompt
-  if (netId !== 184) {
-    const rawAddr = (activeAccount.value.address || '').replace(/[- ]/g, '').toUpperCase();
-    const stored = sessionStorage.getItem('_clob_testnet_key_' + rawAddr) || localStorage.getItem('_clob_testnet_key_' + rawAddr);
-    if (stored) {
-      try {
-        const acc = Account.createFromPrivateKey(stored, netId, 1);
-        if (acc.publicKey.toLowerCase() === activeAccount.value.publicKey.toLowerCase()) {
-          sessionTradingPrivateKey.value = stored;
-          return acc;
-        }
-      } catch (_) {}
-    }
-    // Auto-decrypt using common test passwords if stored in browser
-    const testPasswords = ['TestPassword123!', '12345678', 'password123', 'Password123!', 'test1234'];
-    for (const testPwd of testPasswords) {
-      try {
-        const pwd = new Password(testPwd);
-        const priv = WalletUtils.decryptPrivateKey(pwd, activeAccount.value.encrypted, activeAccount.value.iv);
-        if (priv && priv.length === 64) {
-          sessionTradingPrivateKey.value = priv;
-          sessionStorage.setItem('_clob_testnet_key_' + rawAddr, priv);
-          localStorage.setItem('_clob_testnet_key_' + rawAddr, priv);
-          return Account.createFromPrivateKey(priv, netId, 1);
-        }
-      } catch (_) {}
-    }
+  // Resolve active session key from sessionStorage if available
+  const rawAddr = (activeAccount.value.address || '').replace(/[- ]/g, '').toUpperCase();
+  const stored = sessionStorage.getItem('_clob_testnet_key_' + rawAddr);
+  if (stored) {
+    try {
+      const acc = Account.createFromPrivateKey(stored, netId, 1);
+      if (acc.publicKey.toLowerCase() === activeAccount.value.publicKey.toLowerCase()) {
+        sessionTradingPrivateKey.value = stored;
+        return acc;
+      }
+    } catch (_) {}
   }
 
   // Try inline password if entered
@@ -2598,13 +2588,12 @@ const intervalLabel = computed(() => {
   }
 });
 
-function createSeedCandles(count: number, intervalMinutes: number, targetEndPrice: number, volatility: number): Candle[] {
+function createSeedCandles(count: number, intervalMinutes: number, targetEndPrice: number): Candle[] {
   const nowSec = Math.floor(Date.now() / 1000);
   const intervalSec = intervalMinutes * 60;
   const baseSec = Math.floor(nowSec / intervalSec) * intervalSec;
   const decimals = priceDecimals.value;
-
-  let currentP = targetEndPrice;
+  const price = parseFloat(targetEndPrice.toFixed(decimals));
   const temp: Candle[] = [];
 
   for (let i = 0; i < count; i++) {
@@ -2614,19 +2603,7 @@ function createSeedCandles(count: number, intervalMinutes: number, targetEndPric
     const mm = String(d.getMinutes()).padStart(2, '0');
     const timeStr = `${hh}:${mm}`;
 
-    const reversion = (targetEndPrice - currentP) * 0.035;
-    const delta = ((Math.random() - 0.495) * volatility) + reversion;
-    const openP = Math.max(0.00000001, parseFloat((currentP - delta).toFixed(decimals)));
-    const closeP = parseFloat(currentP.toFixed(decimals));
-
-    const wickHigh = Math.random() * (volatility * 0.65);
-    const wickLow = Math.random() * (volatility * 0.65);
-    const high = parseFloat((Math.max(openP, closeP) + wickHigh).toFixed(decimals));
-    const low = parseFloat(Math.max(0.00000001, Math.min(openP, closeP) - wickLow).toFixed(decimals));
-    const v = Math.round(45 + Math.random() * 280);
-
-    temp.push({ time: candleSec, timeStr, o: openP, h: high, l: low, c: closeP, v });
-    currentP = openP;
+    temp.push({ time: candleSec, timeStr, o: price, h: price, l: price, c: price, v: 0 });
   }
 
   temp.reverse();
@@ -2634,10 +2611,10 @@ function createSeedCandles(count: number, intervalMinutes: number, targetEndPric
 }
 
 const candleData = reactive<Record<ChartInterval, Candle[]>>({
-  '1m': createSeedCandles(120, 1, 0.000076, 0.000002),
-  '5m': createSeedCandles(100, 5, 0.000076, 0.000003),
-  '15m': createSeedCandles(96, 15, 0.000076, 0.000004),
-  '1h': createSeedCandles(72, 60, 0.000076, 0.000006),
+  '1m': createSeedCandles(120, 1, 0.000076),
+  '5m': createSeedCandles(100, 5, 0.000076),
+  '15m': createSeedCandles(96, 15, 0.000076),
+  '1h': createSeedCandles(72, 60, 0.000076),
 });
 
 const latestCandle = computed(() => {
@@ -2732,7 +2709,6 @@ function updateChartPrice(p: number) {
       last.c = p;
       if (p > last.h) last.h = p;
       if (p < last.l) last.l = p;
-      last.v += Math.round(Math.random() * 4 + 1);
 
       if (tf === activeInterval.value && candleSeries && volumeSeries) {
         candleSeries.update({
@@ -3166,6 +3142,7 @@ watch(isChartExpanded, () => {
 });
 
 onMounted(() => {
+  WalletStateUtils.purgeStorageKeys();
   checkMobile();
   if (typeof window !== 'undefined') {
     window.addEventListener('resize', checkMobile);
