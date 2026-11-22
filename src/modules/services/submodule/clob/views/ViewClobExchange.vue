@@ -743,7 +743,7 @@
             <div class="flex justify-between items-center mb-1 text-xs">
               <label class="text-slate-300 font-medium">Amount (XPX)</label>
               <span class="text-slate-400 font-mono text-[11px]">
-                Max: {{ orderSide === 'buy' ? (isBnbPair ? (totalAvailableBnb / effectiveOrderPrice).toFixed(0) : (totalAvailableUsdt / effectiveOrderPrice).toFixed(0)) : totalAvailableXpx.toLocaleString() }}
+                Max: {{ maxOrderAmountDisplay }}
               </span>
             </div>
             <div class="mobile-input-stepper-box">
@@ -1351,6 +1351,7 @@ function snapToTick(val: number, tick: number): number {
 const selectedPair = ref<'XPX/USDT' | 'XPX/BNB'>('XPX/USDT');
 const isBnbPair = computed(() => selectedPair.value === 'XPX/BNB');
 const quoteSymbol = computed(() => isBnbPair.value ? 'BNB' : 'USDT');
+const baseSymbol = computed(() => 'XPX');
 const priceDecimals = computed(() => isBnbPair.value ? 8 : 6);
 const priceStep = computed(() => isBnbPair.value ? '0.00000010' : '0.00005');
 const priceMin = computed(() => isBnbPair.value ? '0.00000001' : '0.000001');
@@ -1931,10 +1932,22 @@ const hasWalletFundsForDeposit = computed(() => {
 
 
 
+// Safe Max Trade Amount Display (Avoids division by zero or NaN)
+const maxOrderAmountDisplay = computed(() => {
+  if (orderSide.value === 'buy') {
+    const effPrice = effectiveOrderPrice.value;
+    if (!effPrice || effPrice <= 0) return '0';
+    const availQuote = isBnbPair.value ? totalAvailableBnb.value : totalAvailableUsdt.value;
+    return Math.floor(availQuote / effPrice).toLocaleString();
+  } else {
+    return totalAvailableXpx.value.toLocaleString();
+  }
+});
+
 // Estimated Fee Display (XPX for Buy, Quote asset for Sell)
 const estimatedFeeDisplay = computed(() => {
   const amt = Number(orderAmount.value) || 0;
-  const isBuy = orderSide.value === 'buy' || orderSide.value === 'Buy';
+  const isBuy = orderSide.value === 'buy';
   const feeAsset = isBuy ? baseSymbol.value : quoteSymbol.value;
   if (amt <= 0) return `0.0000 ${feeAsset}`;
   if (orderType.value === 'Limit') {
