@@ -302,6 +302,19 @@ import {
   UInt64,
 } from "tsjs-xpx-chain-sdk";
 import { AppState } from "@/state/appState";
+
+function parseToAtomicUInt64(valStr: string, divisibility: number = 0): UInt64 {
+  const clean = String(valStr || "0").trim();
+  if (!clean || clean === "0" || isNaN(Number(clean))) return UInt64.fromUint(0);
+  const parts = clean.split(".");
+  const whole = BigInt(parts[0] || "0");
+  const d = Math.max(0, Math.min(18, divisibility));
+  const fracStr = (parts[1] || "").slice(0, d).padEnd(d, "0");
+  const frac = BigInt(fracStr || "0");
+  const factor = 10n ** BigInt(d);
+  const total = whole * factor + frac;
+  return UInt64.fromBigInt(total);
+}
 import SelectInputMultisigAccount from "./components/SelectInputMultisigAccount.vue";
 import PasswordInput from "@/components/PasswordInput.vue";
 import TransactionLayout from "@/components/TransactionLayout.vue";
@@ -443,16 +456,10 @@ const txnFee = computed(() => {
     [
       new SdaExchangeOffer(
         new MosaicId(AppState.nativeToken.assetId),
-        UInt64.fromUint(
-          parseFloat(amountToGive.value) *
-            Math.pow(10, assetToGive.value?.divisibility ?? 0)
-        ),
+        parseToAtomicUInt64(amountToGive.value, assetToGive.value?.divisibility ?? 0),
         new MosaicId(AppState.nativeToken.assetId),
-        UInt64.fromUint(
-          parseFloat(amountToReceive.value) *
-            Math.pow(10, assetToReceiveProperties.value?.divisibility ?? 0)
-        ),
-        UInt64.fromUint(parseInt(duration.value))
+        parseToAtomicUInt64(amountToReceive.value, assetToReceiveProperties.value?.divisibility ?? 0),
+        UInt64.fromUint(parseInt(duration.value) || 0)
       ),
     ],
     AppState.networkType
@@ -777,16 +784,10 @@ const exchangeCreate = async () => {
     [
       new SdaExchangeOffer(
         new MosaicId(assetToGive.value.id),
-        UInt64.fromUint(
-          parseFloat(amountToGive.value) *
-            Math.pow(10, assetToGive.value.divisibility)
-        ),
+        parseToAtomicUInt64(amountToGive.value, assetToGive.value.divisibility),
         new MosaicId(assetToReceive.value),
-        UInt64.fromUint(
-          parseFloat(amountToReceive.value) *
-            Math.pow(10, assetToReceiveProperties.value.divisibility)
-        ),
-        UInt64.fromUint(parseInt(duration.value))
+        parseToAtomicUInt64(amountToReceive.value, assetToReceiveProperties.value.divisibility),
+        UInt64.fromUint(parseInt(duration.value) || 0)
       ),
     ],
     AppState.networkType
