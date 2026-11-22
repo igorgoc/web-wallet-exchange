@@ -4,13 +4,18 @@
     <header class="clob-header">
       <div class="header-left">
         <!-- Back to Wallet Button -->
-        <router-link to="/dashboard" class="back-wallet-btn" title="Back to Wallet Dashboard">
+        <button 
+          type="button" 
+          @click="handleBackToWallet" 
+          class="back-wallet-btn" 
+          :title="isWalletLoggedIn ? 'Back to Wallet Dashboard' : 'Back to Wallet Selection'"
+        >
           <svg class="back-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <line x1="19" y1="12" x2="5" y2="12"></line>
             <polyline points="12 19 5 12 12 5"></polyline>
           </svg>
           <span>Wallet</span>
-        </router-link>
+        </button>
 
         <!-- Trading Pair Switcher (XPX/USDT & XPX/BNB) -->
         <div class="pair-selector">
@@ -507,7 +512,7 @@
             v-if="!activeAccount"
             type="button"
             class="submit-trade-btn btn-unlock"
-            @click="router.push('/wallets')"
+            @click="router.push({ name: 'Home' })"
           >
             Log In / Connect Wallet
           </button>
@@ -775,7 +780,7 @@
             v-if="!activeAccount"
             type="button"
             class="submit-trade-btn btn-unlock text-sm py-3"
-            @click="router.push('/wallets')"
+            @click="router.push({ name: 'Home' })"
           >
             Connect Wallet
           </button>
@@ -1237,6 +1242,18 @@ const getClobApiBase = () => {
 };
 const CLOB_API_BASE = getClobApiBase();
 const router = useRouter();
+
+const isWalletLoggedIn = computed(() => {
+  return Boolean(walletState.isLogin || walletState.currentLoggedInWallet);
+});
+
+function handleBackToWallet() {
+  if (isWalletLoggedIn.value) {
+    router.push({ name: 'ViewDashboard' });
+  } else {
+    router.push({ name: 'Home' });
+  }
+}
 
 // Dynamic exchange network parameters (auto-synced with backend /api/clob/config)
 const dynamicVaultAddress = ref<string>('VAEKLE3WB6XJLFW75JGJJ7Y3DVQWCWX774DDSJ2F');

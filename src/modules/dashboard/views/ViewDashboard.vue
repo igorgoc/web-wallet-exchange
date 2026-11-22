@@ -182,7 +182,8 @@
 
 <script setup lang="ts">
 import PendingDataTable from "@/modules/account/components/PendingDataTable.vue";
-import { computed,  ref, getCurrentInstance, watch } from "vue";
+import { computed, ref, getCurrentInstance, watch, onMounted } from "vue";
+import { useRouter } from "vue-router";
 import {
   TransactionFilterTypes,
 } from "@/modules/dashboard/model/transactions/transaction";
@@ -207,7 +208,20 @@ import { TransactionUtils } from "@/util/transactionUtils";
 
 const { t } = useI18n();
 const toast = useToast();
+const router = useRouter();
 const internalInstance = getCurrentInstance();
+
+onMounted(() => {
+  if (!walletState.isLogin && !walletState.currentLoggedInWallet) {
+    router.push({ name: "Home" });
+  }
+});
+
+watch([() => walletState.isLogin, () => walletState.currentLoggedInWallet], ([isLogin, wallet]) => {
+  if (!isLogin && !wallet) {
+    router.push({ name: "Home" });
+  }
+});
 const emitter = internalInstance.appContext.config.globalProperties.emitter;
 const displayBoard = ref("asset");
 const showAddressQRModal = ref(false);

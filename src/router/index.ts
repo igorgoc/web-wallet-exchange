@@ -1,4 +1,5 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
+import { walletState } from '@/state/walletState';
 import { HomeRoutes } from '@/modules/home/routingHome';
 import { DashboardRoutes } from '@/modules/dashboard/routingDashboard';
 import { TransferRoutes } from '@/modules/transfer/routingTransfer';
@@ -21,5 +22,14 @@ const router = createRouter({
   ...MetadataTransactionRoutes
   ]
 })
+
+router.beforeEach((to, from, next) => {
+  if (to.name === 'ViewDashboard' || to.path === '/dashboard' || to.path.startsWith('/dashboard/')) {
+    if (!walletState.isLogin && !walletState.currentLoggedInWallet) {
+      return next({ name: 'Home' });
+    }
+  }
+  next();
+});
 
 export default router
