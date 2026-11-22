@@ -1531,22 +1531,25 @@ const displayAccountBnb = computed(() => {
   return onChainBnb.value || 0;
 });
 
-// Direct Tradeable Balances (Live On-Chain Wallet Balance minus SuperContract Escrow Lock)
+// Direct Tradeable Balances (Authoritative CLOB Trading Balance, fallback to On-Chain)
 const totalAvailableXpx = computed(() => {
-  const walletAvail = Math.max(0, displayAccountXpx.value - lockedXpxEscrow.value);
-  const base = Math.max(userXpxBalance.value, walletAvail);
+  const base = isClobBalanceLoaded.value
+    ? userXpxBalance.value
+    : Math.max(0, displayAccountXpx.value - lockedXpxEscrow.value);
   return Math.max(0, parseFloat((base - 0.2).toFixed(6))); // Reserve 0.2 XPX for L1 network gas
 });
 
 const totalAvailableUsdt = computed(() => {
-  const walletAvail = Math.max(0, displayAccountUsdt.value - lockedUsdtEscrow.value);
-  const base = Math.max(userUsdtBalance.value, walletAvail);
+  const base = isClobBalanceLoaded.value
+    ? userUsdtBalance.value
+    : Math.max(0, displayAccountUsdt.value - lockedUsdtEscrow.value);
   return parseFloat(base.toFixed(2));
 });
 
 const totalAvailableBnb = computed(() => {
-  const walletAvail = Math.max(0, displayAccountBnb.value - lockedBnbEscrow.value);
-  const base = Math.max(userBnbBalance.value, walletAvail);
+  const base = isClobBalanceLoaded.value
+    ? userBnbBalance.value
+    : Math.max(0, displayAccountBnb.value - lockedBnbEscrow.value);
   return parseFloat(base.toFixed(6));
 });
 
@@ -2431,7 +2434,7 @@ async function submitOrder() {
         const txMsg = data.settlementTxHash ? `\n🔗 Catapult Settlement Tx: ${data.settlementTxHash.slice(0, 16)}...` : '';
         showToast(
           'Trade Executed!',
-          `${data.type} ${data.side} order matched via 3/3 BFT Consensus on ${selectedPair.value}!\nGas: ${data.gasConsumed || 24000} units${txMsg}\nBalances settled on-chain!`,
+          `${data.type} ${data.side} order matched via 3/3 BFT Consensus on ${selectedPair.value}!\nExchange balance updated! Click 'Withdraw' to move coins to your L1 wallet anytime.${txMsg}`,
           'trade',
           5000,
           data.settlementTxHash
