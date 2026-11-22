@@ -2997,20 +2997,25 @@ async function syncFromNode() {
     if (res.ok) {
       const data = await res.json();
       isConnected.value = true;
-      bids.value = (data?.bids || []).map((b: any, idx: number) => ({
+      const parsedBids = (data?.bids || []).map((b: any, idx: number) => ({
         price: b.price / 100_000_000,
         amount: b.total_depth / 1_000_000,
         total: (b.price / 100_000_000) * (b.total_depth / 1_000_000),
         orderId: 100 + idx,
         owner: 'On-Chain'
       }));
-      asks.value = (data?.asks || []).map((a: any, idx: number) => ({
+      const parsedAsks = (data?.asks || []).map((a: any, idx: number) => ({
         price: a.price / 100_000_000,
         amount: a.total_depth / 1_000_000,
         total: (a.price / 100_000_000) * (a.total_depth / 1_000_000),
         orderId: 200 + idx,
         owner: 'On-Chain'
       }));
+      // Prevent transient UI orderbook blanking: only update if data is populated or if local book is empty
+      if (parsedBids.length > 0 || parsedAsks.length > 0 || (bids.value.length === 0 && asks.value.length === 0)) {
+        bids.value = parsedBids;
+        asks.value = parsedAsks;
+      }
     } else {
       isConnected.value = false;
     }
@@ -3020,32 +3025,35 @@ async function syncFromNode() {
     if (resTrades.ok) {
       const tradeData = await resTrades.json();
       if (Array.isArray(tradeData)) {
-        trades.value = tradeData.slice().reverse().map((t: any, idx: number) => {
-          const price = t.price / 100_000_000;
-          const amount = t.base_amount / 1_000_000;
-          const side = (t.taker_side === 'Buy' || t.taker_side === 0) ? 'buy' : 'sell';
-          const tradeKey = `${t.maker_order_id}_${t.price}_${t.base_amount}_${t.quote_amount}_${idx}`;
-          if (!tradeTimestampMap.has(tradeKey)) {
-            tradeTimestampMap.set(tradeKey, t.time || new Date().toTimeString().split(' ')[0]);
+        // Prevent transient UI trades wipeout: only update if trades exist or if local list is empty
+        if (tradeData.length > 0 || trades.value.length === 0) {
+          trades.value = tradeData.slice().reverse().map((t: any, idx: number) => {
+            const price = t.price / 100_000_000;
+            const amount = t.base_amount / 1_000_000;
+            const side = (t.taker_side === 'Buy' || t.taker_side === 0) ? 'buy' : 'sell';
+            const tradeKey = `${t.maker_order_id}_${t.price}_${t.base_amount}_${t.quote_amount}_${idx}`;
+            if (!tradeTimestampMap.has(tradeKey)) {
+              tradeTimestampMap.set(tradeKey, t.time || new Date().toTimeString().split(' ')[0]);
+            }
+            const time = t.time || tradeTimestampMap.get(tradeKey) || '';
+            const makerPub = pubKeyToHex(t.maker_pubkey);
+            const takerPub = pubKeyToHex(t.taker_pubkey);
+            return {
+              price,
+              amount,
+              side,
+              takerSide: side,
+              maker_pubkey: makerPub,
+              taker_pubkey: takerPub,
+              time
+            };
+          });
+          const latest = trades.value[0];
+          if (latest) {
+            currentPrice.value = latest.price;
+            lastTradeSide.value = latest.side;
+            updateChartPrice(latest.price);
           }
-          const time = t.time || tradeTimestampMap.get(tradeKey) || '';
-          const makerPub = pubKeyToHex(t.maker_pubkey);
-          const takerPub = pubKeyToHex(t.taker_pubkey);
-          return {
-            price,
-            amount,
-            side,
-            takerSide: side,
-            maker_pubkey: makerPub,
-            taker_pubkey: takerPub,
-            time
-          };
-        });
-        const latest = trades.value[0];
-        if (latest) {
-          currentPrice.value = latest.price;
-          lastTradeSide.value = latest.side;
-          updateChartPrice(latest.price);
         }
       }
     }
