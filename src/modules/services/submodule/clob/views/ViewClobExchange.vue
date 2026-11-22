@@ -882,7 +882,7 @@
           <div class="panel-header flex justify-between items-center">
             <span class="font-bold text-slate-200 text-xs">Live Order Book</span>
             <div class="text-[11px] font-mono text-slate-400">
-              Spread: <span class="text-slate-200">{{ spreadAmount.toFixed(priceDecimals) }}</span> ({{ spreadPct }}%)
+              Spread: <span class="text-slate-200">{{ formatCleanPrice(spread) }}</span> ({{ spreadPct }}%)
             </div>
           </div>
           <div class="ob-table-header px-3 py-1.5 text-[11px] text-slate-400 grid grid-cols-3 border-b border-slate-800">
@@ -1206,7 +1206,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import { walletState } from '@/state/walletState';
 import { networkState } from '@/state/networkState';
@@ -1830,6 +1830,8 @@ const spreadPct = computed(() => {
   return bestAsk > 0 ? ((spread.value / bestAsk) * 100).toFixed(2) : '0.00';
 });
 
+const spreadAmount = computed(() => spread.value);
+
 const bestBidPrice = computed(() => {
   return bids.value.length ? bids.value[0].price : currentPrice.value;
 });
@@ -2188,6 +2190,10 @@ function openWithdrawModal() {
   withdrawError.value = '';
   withdrawAmount.value = '';
   showWithdrawModal.value = true;
+}
+
+function openDepositModal() {
+  showToast('Vault Auto-Deposit Active', 'Your on-chain wallet funds are automatically available for spot trading with zero deposit fees.', 'info');
 }
 
 function setWithdrawPct(pct: number) {
