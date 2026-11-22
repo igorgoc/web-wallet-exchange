@@ -636,9 +636,8 @@
               <span v-if="isBnbPair" class="text-emerald-400 font-mono font-bold">{{ totalAvailableBnb.toFixed(4) }} BNB</span>
               <span v-else class="text-emerald-400 font-mono font-bold">${{ totalAvailableUsdt.toFixed(2) }} USDT</span>
             </div>
-            <div class="flex items-center gap-1.5 flex-shrink-0">
-              <button type="button" class="mobile-dep-pill" @click="openDepositModal" title="Deposit funds into CLOB Vault">+ Deposit</button>
-              <button type="button" class="mobile-wd-pill" @click="openWithdrawModal" title="Withdraw funds to L1">Withdraw</button>
+            <div class="flex items-center flex-shrink-0">
+              <button type="button" class="mobile-wd-pill" @click="openWithdrawModal" title="Withdraw funds from CLOB Vault to L1 wallet">Withdraw</button>
             </div>
           </div>
         </div>
@@ -2190,10 +2189,6 @@ function openWithdrawModal() {
   withdrawError.value = '';
   withdrawAmount.value = '';
   showWithdrawModal.value = true;
-}
-
-function openDepositModal() {
-  showToast('Vault Auto-Deposit Active', 'Your on-chain wallet funds are automatically available for spot trading with zero deposit fees.', 'info');
 }
 
 function setWithdrawPct(pct: number) {
@@ -3808,22 +3803,6 @@ onUnmounted(() => {
   padding: 8px 12px;
 }
 
-.mobile-dep-pill {
-  background: #1eb972;
-  color: #071a12;
-  border: none;
-  border-radius: 9999px;
-  padding: 3px 9px;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.mobile-dep-pill:hover {
-  background: #23cb7f;
-}
-
 .mobile-wd-pill {
   background: #17241f;
   color: #94a3b8;
@@ -4813,28 +4792,6 @@ onUnmounted(() => {
 .ratio-ask {
   background: #8e3034;
   box-shadow: 0 2px 8px rgba(142, 48, 52, 0.25);
-}
-
-.deposit-pill {
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(6, 182, 212, 0.2));
-  color: #34d399;
-  border: 1px solid rgba(16, 185, 129, 0.4);
-  padding: 5px 12px;
-  border-radius: 20px;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.deposit-pill:hover {
-  background: linear-gradient(135deg, #10b981, #06b6d4);
-  color: #ffffff;
-  border-color: transparent;
-  transform: translateY(-1px);
 }
 
 .withdraw-pill {
