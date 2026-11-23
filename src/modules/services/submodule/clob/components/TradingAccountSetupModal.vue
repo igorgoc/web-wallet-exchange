@@ -1,74 +1,66 @@
 <template>
-  <div v-if="visible" class="modal-overlay" @click.self="$emit('close')">
+  <div v-if="visible" class="modal-overlay" @click.self="handleClose">
     <div class="modal-card trading-setup-card">
       <div class="modal-header">
         <div class="modal-title">
           <span class="modal-icon">🛡️</span>
           <div>
-            <h3>Activate Native Smart Trading Account</h3>
-            <p class="modal-subtitle">Solution 2 (Model A) • 2-of-2 Sirius L1 Co-Signed Security</p>
+            <h3>Activate Smart Trading Account</h3>
+            <p class="modal-subtitle">Non-custodial 2-of-2 Sirius L1 account</p>
           </div>
         </div>
-        <button class="modal-close-btn" @click="$emit('close')">✕</button>
+        <button class="modal-close-btn" @click="handleClose">✕</button>
       </div>
 
       <div class="modal-body">
         <div class="security-Guarantee-box mb-3">
           <div class="guarantee-row">
             <span class="badge-ok">✓</span>
-            <span><strong>Zero Hot Wallet Risk:</strong> Your coins stay in your own dedicated on-chain Sirius account.</span>
+            <span>Your funds stay in your own Sirius account — never a central hot wallet.</span>
           </div>
           <div class="guarantee-row">
-            <span class="badge-ok">✓</span>
-            <span><strong>No Exchange Theft:</strong> Validator servers cannot move a single mosaic without your key.</span>
-          </div>
-          <div class="guarantee-row">
-            <span class="badge-ok">✓</span>
-            <span><strong>BFT Co-Signing (2-of-3):</strong> Withdrawals &amp; settlements require 2-of-3 distributed validator nodes.</span>
+            <span class="badge-ok">⏳</span>
+            <span><strong>Block confirmation:</strong> Please wait ~15–30 seconds after activating (Fee: ~0.05 XPX).</span>
           </div>
         </div>
 
-        <div class="summary-box mb-3 font-mono text-xs">
-          <div class="summary-row">
-            <span class="text-slate-400">Cosigner 1 (You)</span>
-            <span class="text-emerald-400">{{ shortKey(activeAccount?.publicKey) }}</span>
-          </div>
-          <div class="summary-row">
-            <span class="text-slate-400">Cosigner 2 (Validator Cluster 2-of-3)</span>
-            <span class="text-sky-400">{{ shortKey(clusterPubKey) }}</span>
-          </div>
-          <div class="summary-row">
-            <span class="text-slate-400">On-Chain Scheme</span>
-            <span class="text-slate-200">Native 2-of-2 Multisig (Level 1 → Level 2)</span>
-          </div>
-          <div class="summary-row">
-            <span class="text-slate-400">L1 Network Activation Fee</span>
-            <span class="text-amber-400">~0.05 XPX (from Main Wallet)</span>
+        <div v-if="isWaitingConfirmation" class="confirm-wait-box mb-3">
+          <div class="confirm-wait-row">
+            <span class="spinner-dot"></span>
+            <div>
+              <div class="confirm-wait-title">Waiting for Sirius L1 block confirmation...</div>
+              <div class="confirm-wait-sub">
+                Usually takes ~15–30s • {{ elapsedSeconds }}s elapsed
+                <span v-if="broadcastTxHash"> • Tx {{ broadcastTxHash.slice(0, 10) }}...</span>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div v-if="!sessionKey" class="form-group mb-2">
+        <div v-if="!sessionKey && !isWaitingConfirmation" class="form-group mb-2">
           <label class="modal-label">Wallet Password</label>
           <div class="input-box">
             <input
               type="password"
               v-model="passwordInput"
               class="form-input font-mono"
-              placeholder="Enter wallet password to sign L1 activation"
+              placeholder="Enter wallet password"
               @keyup.enter="activate"
             />
           </div>
         </div>
 
         <p v-if="errorMsg" class="text-xs text-rose-400 font-medium mt-2">{{ errorMsg }}</p>
-        <p v-if="statusMsg" class="text-xs text-emerald-400 font-medium mt-2">{{ statusMsg }}</p>
+        <p v-if="statusMsg && !isWaitingConfirmation" class="text-xs text-emerald-400 font-medium mt-2">{{ statusMsg }}</p>
       </div>
 
       <div class="modal-footer">
-        <button class="btn-cancel" @click="$emit('close')" :disabled="isActivating">Cancel</button>
-        <button class="btn-confirm-activate" @click="activate" :disabled="isActivating">
-          <span v-if="isActivating">Broadcasting L1 Activation...</span>
-          <span v-else>Activate 2-of-2 Trading Account</span>
+        <button class="btn-cancel" @click="handleClose" :disabled="isActivating && !isWaitingConfirmation">
+          {{ isWaitingConfirmation ? 'Hide & Wait in Background' : 'Cancel' }}
+        </button>
+        <button v-if="!isWaitingConfirmation" class="btn-confirm-activate" @click="activate" :disabled="isActivating">
+          <span v-if="isActivating">Submitting (~15–30s)...</span>
+          <span v-else>Activate Smart Trading</span>
         </button>
       </div>
     </div>
@@ -76,7 +68,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, onUnmounted } from 'vue';
 import {
   Account,
   Address,
@@ -115,12 +107,37 @@ const passwordInput = ref('');
 const errorMsg = ref('');
 const statusMsg = ref('');
 const isActivating = ref(false);
+const isWaitingConfirmation = ref(false);
+const broadcastTxHash = ref('');
+const elapsedSeconds = ref(0);
+let elapsedTimer: ReturnType<typeof setInterval> | null = null;
+let pendingActivatedPayload: any = null;
+let dismissedToBackground = false;
 
-const clusterPubKey = computed(() => props.validatorCluster?.clusterPublicKey || '');
+function stopElapsedTimer() {
+  if (elapsedTimer) {
+    clearInterval(elapsedTimer);
+    elapsedTimer = null;
+  }
+}
 
-function shortKey(k: string) {
-  if (!k) return 'Loading...';
-  return `${k.slice(0, 8)}...${k.slice(-6)}`;
+onUnmounted(() => {
+  stopElapsedTimer();
+});
+
+function handleClose() {
+  if (isWaitingConfirmation.value && pendingActivatedPayload) {
+    dismissedToBackground = true;
+    isWaitingConfirmation.value = false;
+    stopElapsedTimer();
+    const payload = pendingActivatedPayload;
+    pendingActivatedPayload = null;
+    emit('activated', { ...payload, confirmed: false });
+    return;
+  }
+  if (!isActivating.value) {
+    emit('close');
+  }
 }
 
 function getSiriusNodeUrl(netType: number): string {
@@ -326,12 +343,56 @@ async function activate() {
       } catch (_) {}
     }
 
-    statusMsg.value = `Activation broadcast (${data.txHash.slice(0, 14)}...)! Confirming on Sirius L1...`;
+    statusMsg.value = 'Broadcast complete. Waiting for Sirius L1 block confirmation...';
     passwordInput.value = '';
-    emit('activated', { ...data, ownerPrivateKey: ownerPriv });
+    broadcastTxHash.value = data.txHash || '';
+    pendingActivatedPayload = { ...data, ownerPrivateKey: ownerPriv };
+    dismissedToBackground = false;
+    isWaitingConfirmation.value = true;
+    elapsedSeconds.value = 0;
+    stopElapsedTimer();
+    elapsedTimer = setInterval(() => {
+      elapsedSeconds.value += 1;
+    }, 1000);
+
+    // Poll Sirius L1 until transaction confirms in a block (~15–30s) or user moves to background
+    const nodeUrl = getSiriusNodeUrl(netType);
+    let confirmedOnL1 = false;
+    for (let i = 0; i < 24; i++) {
+      if (dismissedToBackground) return;
+      await new Promise((r) => setTimeout(r, 2500));
+      if (dismissedToBackground) return;
+      try {
+        const stRes = await fetch(`${nodeUrl}/transactionStatus/${data.txHash}`);
+        if (stRes.ok) {
+          const st = await stRes.json();
+          if (st.group === 'confirmed') {
+            confirmedOnL1 = true;
+            break;
+          }
+          if (st.group === 'failed') {
+            throw new Error(`Sirius L1 rejected activation: ${st.status}`);
+          }
+        }
+      } catch (pollErr: any) {
+        if (pollErr.message?.includes('rejected activation')) throw pollErr;
+      }
+    }
+
+    stopElapsedTimer();
+    isWaitingConfirmation.value = false;
+    const finalPayload = pendingActivatedPayload || { ...data, ownerPrivateKey: ownerPriv };
+    pendingActivatedPayload = null;
+    if (!dismissedToBackground) {
+      emit('activated', { ...finalPayload, confirmed: confirmedOnL1 });
+    }
   } catch (err: any) {
+    stopElapsedTimer();
+    isWaitingConfirmation.value = false;
+    pendingActivatedPayload = null;
     errorMsg.value = err?.message || 'Activation failed';
   } finally {
+    stopElapsedTimer();
     isActivating.value = false;
   }
 }
@@ -410,16 +471,40 @@ async function activate() {
   color: #34d399;
   font-weight: 700;
 }
-.summary-box {
-  background: #080d0b;
-  border: 1px solid #172721;
+.confirm-wait-box {
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.28);
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 12px;
 }
-.summary-row {
+.confirm-wait-row {
   display: flex;
-  justify-content: space-between;
-  padding: 3px 0;
+  align-items: center;
+  gap: 10px;
+}
+.confirm-wait-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #e0f2fe;
+}
+.confirm-wait-sub {
+  font-size: 11px;
+  color: #7dd3fc;
+  margin-top: 2px;
+}
+.spinner-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  border: 2px solid rgba(125, 211, 252, 0.25);
+  border-top-color: #38bdf8;
+  flex-shrink: 0;
+  animation: clob-spin 0.85s linear infinite;
+}
+@keyframes clob-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .modal-label {
   display: block;

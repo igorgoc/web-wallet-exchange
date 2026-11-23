@@ -2390,10 +2390,21 @@ function onTradingAccountActivated(res: any) {
     setTradingSessionKey(res.ownerPrivateKey);
   }
   showTradingSetupModal.value = false;
+  if (res?.confirmed) {
+    fetchTradingAccountStatus().then(() => syncFromNode());
+    showToast(
+      'Smart Trading Account Active!',
+      'Your 2-of-2 Smart Trading Account is confirmed on Sirius L1.',
+      'success',
+      5000,
+      res.txHash
+    );
+    return;
+  }
   showToast(
-    'Smart Trading Account Broadcast!',
-    `2-of-2 Co-Signed Trading Account conversion submitted (${String(res.txHash || '').slice(0, 14)}...). Confirming on Sirius L1 (~15s).`,
-    'success',
+    'Confirming on Sirius L1 (~15–30s)...',
+    `Activation broadcast (${String(res.txHash || '').slice(0, 12)}...). Waiting for Sirius L1 block confirmation (~15–30s).`,
+    'info',
     7000,
     res.txHash
   );
@@ -2402,10 +2413,10 @@ function onTradingAccountActivated(res: any) {
   const t = setInterval(async () => {
     polls++;
     await fetchTradingAccountStatus();
-    if (hasSmartTradingAccount.value || polls >= 12) {
+    if (hasSmartTradingAccount.value || polls >= 16) {
       clearInterval(t);
       if (hasSmartTradingAccount.value) {
-        showToast('Smart Trading Account Active!', 'Your non-custodial 2-of-2 Trading Account is now live on Sirius L1!', 'success', 5000);
+        showToast('Smart Trading Account Active!', 'Your 2-of-2 Smart Trading Account is confirmed on Sirius L1!', 'success', 5000);
         syncFromNode();
       }
     }
