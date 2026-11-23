@@ -79,17 +79,23 @@
 import { ref, computed } from 'vue';
 import {
   Account,
+  Address,
   AggregateTransaction,
   CosignatureTransaction,
   Deadline,
   ModifyMultisigAccountTransaction,
   MultisigCosignatoryModification,
   MultisigCosignatoryModificationType,
+  Mosaic,
+  MosaicId,
   Password,
+  PlainMessage,
   PublicAccount,
+  TransferTransaction,
   UInt64,
 } from 'tsjs-xpx-chain-sdk';
 import { walletState } from '@/state/walletState';
+import { networkState } from '@/state/networkState';
 import { WalletAccount } from '@/models/walletAccount';
 import { WalletUtils } from '@/util/walletUtils';
 
@@ -115,6 +121,22 @@ const clusterPubKey = computed(() => props.validatorCluster?.clusterPublicKey ||
 function shortKey(k: string) {
   if (!k) return 'Loading...';
   return `${k.slice(0, 8)}...${k.slice(-6)}`;
+}
+
+function getSiriusNodeUrl(netType: number): string {
+  let nodeEndpoint = networkState.selectedAPIEndpoint || (netType === 184 ? 'https://betelgeuse.xpxsirius.io' : 'https://api-2.testnet2.xpxsirius.io');
+  if (netType === 184 && (!networkState.selectedAPIEndpoint || networkState.selectedAPIEndpoint.includes('testnet'))) {
+    nodeEndpoint = 'https://betelgeuse.xpxsirius.io';
+  }
+  if (!nodeEndpoint.startsWith('http://') && !nodeEndpoint.startsWith('https://')) {
+    const proto = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'https' : 'http';
+    nodeEndpoint = `${proto}://${nodeEndpoint}`;
+  }
+  nodeEndpoint = nodeEndpoint.replace(/\/+$/, '');
+  if (nodeEndpoint.startsWith('https://') && nodeEndpoint.endsWith(':3000')) {
+    nodeEndpoint = nodeEndpoint.replace(':3000', '');
+  }
+  return nodeEndpoint;
 }
 
 async function activate() {
@@ -162,6 +184,64 @@ async function activate() {
     const genHash = clusterInfo.generationHash || props.generationHash;
     const netType = clusterInfo.networkType || props.networkType;
     const ownerAcc = Account.createFromPrivateKey(ownerPriv, netType, 1);
+
+    // 1b. Ensure Level-2 Validator Cluster (2-of-3) is initialized on-chain before activating Level-1
+    if (!clusterInfo.isMultisigConfirmedOnChain) {
+      statusMsg.value = 'Verifying Level-2 BFT Validator Cluster on Sirius L1...';
+      const bootRes = await fetch(`${props.clobApiBase}/api/clob/validator-cluster/bootstrap`, {
+        method: 'POST',
+      });
+      const bootData = await bootRes.json();
+      if (!bootData.ok && bootData.needsFunding && bootData.clusterAddress) {
+        statusMsg.value = 'Sponsoring 0.5 XPX one-time L1 gas to initialize BFT Validator Cluster (~15s)...';
+        const xpxHex = netType === 184 ? '402B2F579FAEBC59' : '13BFC518E40549D7';
+        const reqAtomic = BigInt(bootData.requiredAtomic || '500000');
+        const fundTx = TransferTransaction.create(
+          Deadline.create(),
+          Address.createFromRawAddress(bootData.clusterAddress),
+          [new Mosaic(new MosaicId(xpxHex), UInt64.fromHex(reqAtomic.toString(16).padStart(16, '0')))],
+          PlainMessage.create('CLOB Validator Cluster Bootstrap'),
+          netType,
+          UInt64.fromUint(100000)
+        );
+        const signedFund = ownerAcc.preV2Sign(fundTx, genHash);
+        const nodeUrl = getSiriusNodeUrl(netType);
+        const putRes = await fetch(`${nodeUrl}/transactions`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ payload: signedFund.payload }),
+        });
+        if (!putRes.ok) {
+          throw new Error('Failed to broadcast Level-2 cluster bootstrap transfer.');
+        }
+        // Poll until the 0.5 XPX sponsorship transfer confirms on L1
+        for (let i = 0; i < 30; i++) {
+          await new Promise((r) => setTimeout(r, 2500));
+          try {
+            const stRes = await fetch(`${nodeUrl}/transactionStatus/${signedFund.hash}`);
+            if (stRes.ok) {
+              const st = await stRes.json();
+              if (st.group === 'confirmed') break;
+              if (st.group === 'failed') {
+                throw new Error(`Bootstrap transfer failed on-chain: ${st.status}`);
+              }
+            }
+          } catch (pollErr: any) {
+            if (pollErr.message?.includes('failed on-chain')) throw pollErr;
+          }
+        }
+        statusMsg.value = 'Converting BFT Validator Cluster to 2-of-3 multisig on L1 (~15s)...';
+        const bootRes2 = await fetch(`${props.clobApiBase}/api/clob/validator-cluster/bootstrap`, {
+          method: 'POST',
+        });
+        const bootData2 = await bootRes2.json();
+        if (!bootData2.ok) {
+          throw new Error(bootData2.error || 'Level-2 Validator Cluster conversion failed.');
+        }
+      } else if (!bootData.ok) {
+        throw new Error(bootData.error || 'Validator Cluster bootstrap failed.');
+      }
+    }
 
     // 2. Generate dedicated Smart Trading Account keypair (and save to local wallet if password provided)
     const tradingAcc = Account.generateNewAccount(netType);
