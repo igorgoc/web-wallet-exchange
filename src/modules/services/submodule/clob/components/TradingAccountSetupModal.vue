@@ -243,32 +243,8 @@ async function activate() {
       }
     }
 
-    // 2. Generate dedicated Smart Trading Account keypair (and save to local wallet if password provided)
+    // 2. Generate dedicated Smart Trading Account keypair (saved ONLY after L1 broadcast succeeds!)
     const tradingAcc = Account.generateNewAccount(netType);
-    const wallet = walletState.currentLoggedInWallet;
-    if (wallet && passwordInput.value) {
-      try {
-        const pwdObj = WalletUtils.createPassword(passwordInput.value);
-        const enc = WalletUtils.createAccountSimpleFromPrivateKey(
-          `Trading (${props.activeAccount.name || 'CLOB'})`,
-          pwdObj,
-          tradingAcc.privateKey,
-          netType
-        );
-        const wa = new WalletAccount(
-          `Trading (${props.activeAccount.name || 'CLOB'})`,
-          tradingAcc.publicKey,
-          tradingAcc.address.plain(),
-          'pass:bip32',
-          enc.encryptedPrivateKey.encryptedKey,
-          enc.encryptedPrivateKey.iv
-        );
-        wa.isTradingAccount = true;
-        wa.linkedMainAddress = props.activeAccount.address;
-        wallet.accounts.push(wa);
-        walletState.wallets.saveMyWalletOnlytoLocalStorage(wallet);
-      } catch (_) {}
-    }
 
     statusMsg.value = 'Signing native 2-of-2 ModifyMultisigAccountTransaction...';
     const clusterPubAcc = PublicAccount.createFromPublicKey(clusterInfo.clusterPublicKey, netType);
@@ -318,6 +294,36 @@ async function activate() {
     const data = await res.json();
     if (!data.ok) {
       throw new Error(data.error || 'Failed to activate Trading Account');
+    }
+
+    // Persist Trading Account into local wallet ONLY AFTER L1 activation broadcast succeeded
+    const wallet = walletState.currentLoggedInWallet;
+    if (wallet && passwordInput.value) {
+      try {
+        const plainAddr = tradingAcc.address.plain();
+        const exists = wallet.accounts.some((a: any) => a.address === plainAddr || a.publicKey === tradingAcc.publicKey);
+        if (!exists) {
+          const pwdObj = WalletUtils.createPassword(passwordInput.value);
+          const enc = WalletUtils.createAccountSimpleFromPrivateKey(
+            `Trading (${props.activeAccount.name || 'CLOB'})`,
+            pwdObj,
+            tradingAcc.privateKey,
+            netType
+          );
+          const wa = new WalletAccount(
+            `Trading (${props.activeAccount.name || 'CLOB'})`,
+            tradingAcc.publicKey,
+            plainAddr,
+            'pass:bip32',
+            enc.encryptedPrivateKey.encryptedKey,
+            enc.encryptedPrivateKey.iv
+          );
+          wa.isTradingAccount = true;
+          wa.linkedMainAddress = props.activeAccount.address;
+          wallet.accounts.push(wa);
+          walletState.wallets.saveMyWalletOnlytoLocalStorage(wallet);
+        }
+      } catch (_) {}
     }
 
     statusMsg.value = `Activation broadcast (${data.txHash.slice(0, 14)}...)! Confirming on Sirius L1...`;

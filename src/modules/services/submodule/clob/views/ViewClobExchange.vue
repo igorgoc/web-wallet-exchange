@@ -58,60 +58,56 @@
         </div>
       </div>
 
-      <!-- SIRIUS CLOB Brand Badge (Center Empty Space) -->
-      <div class="header-center">
-        <div class="sirius-clob-badge" title="SiriusCLOB Decentralized Central Limit Order Book • Powered by ProximaX XPX SuperContract WASM Consensus">
-          <div class="badge-xpx-pill">
-            <img src="@/modules/dashboard/img/icon-xpx.svg" alt="XPX" class="badge-xpx-icon" />
-            <span class="badge-xpx-text">XPX</span>
-          </div>
-          <div class="badge-divider"></div>
-          <div class="badge-content">
-            <span class="badge-brand">SIRIUS</span>
-            <span class="badge-highlight">CLOB</span>
-            <span class="badge-sub">DEX</span>
-          </div>
-          <span class="badge-chip">SuperContract</span>
-        </div>
-      </div>
-
       <div class="header-right">
         <!-- User Active Wallet & Tradeable Balance Area (Desktop) -->
         <div class="wallet-balance-area font-mono mobile-hide" v-if="activeAccount">
-          <template v-if="hasSmartTradingAccount">
-            <span class="smart-acc-badge" :title="`Native 2-of-2 Co-Signed Smart Trading Account: ${tradingAccountAddress}`">
-              🛡️ Smart Trading ({{ shortAddress(tradingAccountAddress) }})
-            </span>
-          </template>
-          <template v-else-if="isTradingAccountPending">
-            <span class="smart-acc-pending" title="2-of-2 Multisig activation confirming on Sirius L1 (~15s)">
-              ⏳ Activating 2-of-2...
-            </span>
-          </template>
-          <button
-            v-else
-            type="button"
-            class="activate-smart-btn"
-            @click="openTradingSetupModal"
-            title="Activate Non-Custodial 2-of-2 Co-Signed Smart Trading Account"
-          >
-            ⚡ Activate Smart Trading
-          </button>
-          <span class="bal-sep">•</span>
           <span class="bal-val text-emerald-400" title="Tradeable XPX">{{ totalAvailableXpx.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 }) }} XPX</span>
           <span class="bal-sep">•</span>
           <span v-if="isBnbPair" class="bal-val text-emerald-400" title="Tradeable BNB">{{ totalAvailableBnb.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) }} BNB</span>
           <span v-else class="bal-val text-emerald-400" title="Tradeable USDT">${{ totalAvailableUsdt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} USDT</span>
+          <span class="bal-sep">•</span>
           <button
             v-if="hasSmartTradingAccount"
             type="button"
-            class="topup-pill ml-2"
+            class="header-action-pill pill-activated"
+            disabled
+            :title="`Smart Trading Account Active: ${tradingAccountAddress}`"
+          >
+            Smart trading activated
+          </button>
+          <button
+            v-else-if="isTradingAccountPending"
+            type="button"
+            class="header-action-pill pill-pending"
+            disabled
+            title="2-of-2 Multisig activation confirming on Sirius L1 (~15s)"
+          >
+            Activating...
+          </button>
+          <button
+            v-else
+            type="button"
+            class="header-action-pill pill-activate"
+            @click="openTradingSetupModal"
+            title="Activate Non-Custodial 2-of-2 Co-Signed Smart Trading Account"
+          >
+            Activate Smart Trading
+          </button>
+          <button
+            v-if="hasSmartTradingAccount"
+            type="button"
+            class="header-action-pill pill-topup"
             @click="openTopUpModal"
             title="Transfer coins from Personal Wallet to your 2-of-2 Smart Trading Account"
           >
             + Top Up
           </button>
-          <button class="withdraw-pill ml-2" @click="openWithdrawModal" :title="hasSmartTradingAccount ? 'Co-sign non-custodial withdrawal from Smart Trading Account to Personal Wallet' : 'Withdraw funds from CLOB Vault to L1 wallet'">
+          <button
+            type="button"
+            class="header-action-pill pill-withdraw"
+            @click="openWithdrawModal"
+            :title="hasSmartTradingAccount ? 'Co-sign non-custodial withdrawal from Smart Trading Account to Personal Wallet' : 'Withdraw funds from CLOB Vault to L1 wallet'"
+          >
             Withdraw
           </button>
         </div>
@@ -5591,61 +5587,71 @@ onUnmounted(() => {
   }
 }
 
-.smart-acc-badge {
+.header-action-pill {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
+  justify-content: center;
+  height: 28px;
+  padding: 0 12px;
   border-radius: 9999px;
-  background: rgba(16, 185, 129, 0.14);
-  border: 1px solid rgba(16, 185, 129, 0.35);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid transparent;
+}
+
+.pill-activate {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.24), rgba(5, 150, 105, 0.24));
+  border-color: rgba(16, 185, 129, 0.45);
   color: #34d399;
-  font-size: 11px;
-  font-weight: 700;
 }
 
-.smart-acc-pending {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: 9999px;
+.pill-activate:hover {
+  background: linear-gradient(135deg, #10b981, #059669);
+  border-color: transparent;
+  color: #022c22;
+  transform: translateY(-1px);
+}
+
+.pill-activated {
+  background: #1e293b;
+  border-color: #334155;
+  color: #94a3b8;
+  cursor: default;
+}
+
+.pill-pending {
   background: rgba(245, 158, 11, 0.14);
-  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-color: rgba(245, 158, 11, 0.35);
   color: #fbbf24;
-  font-size: 11px;
-  font-weight: 600;
+  cursor: wait;
 }
 
-.activate-smart-btn {
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.25), rgba(5, 150, 105, 0.25));
-  border: 1px solid rgba(16, 185, 129, 0.45);
-  color: #6ee7b7;
-  padding: 3px 10px;
-  border-radius: 9999px;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.activate-smart-btn:hover {
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.4), rgba(5, 150, 105, 0.4));
-  color: #ffffff;
-}
-
-.topup-pill {
-  background: rgba(56, 189, 248, 0.14);
-  border: 1px solid rgba(56, 189, 248, 0.35);
+.pill-topup {
+  background: rgba(56, 189, 248, 0.16);
+  border-color: rgba(56, 189, 248, 0.4);
   color: #7dd3fc;
-  padding: 2px 8px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
 }
 
-.topup-pill:hover {
-  background: rgba(56, 189, 248, 0.28);
+.pill-topup:hover {
+  background: #0284c7;
+  border-color: transparent;
   color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.pill-withdraw {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(236, 72, 153, 0.2));
+  border-color: rgba(139, 92, 246, 0.4);
+  color: #c084fc;
+}
+
+.pill-withdraw:hover {
+  background: linear-gradient(135deg, #8b5cf6, #ec4899);
+  border-color: transparent;
+  color: #ffffff;
+  transform: translateY(-1px);
 }
 </style>
