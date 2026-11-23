@@ -1058,7 +1058,7 @@
     </main>
 
     <!-- Password Unlock Modal for Session Trading -->
-    <div v-if="showPasswordModal" class="modal-overlay" @click.self="showPasswordModal = false">
+    <div v-if="showPasswordModal" class="modal-overlay" style="z-index: 10050" @click.self="showPasswordModal = false">
       <div class="modal-card">
         <div class="modal-header">
           <div class="modal-title">
@@ -2472,11 +2472,14 @@ const pendingSettlementNotice = computed(() => {
   return '';
 });
 
-async function cosignAllPendingSettlements(): Promise<number> {
-  if (!hasSmartTradingAccount.value || !activeAccount.value?.publicKey) return 0;
+async function cosignAllPendingSettlements(): Promise<{ signedCount: number; errors: string[] }> {
+  if (!hasSmartTradingAccount.value || !activeAccount.value?.publicKey) {
+    return { signedCount: 0, errors: [] };
+  }
   const signer = getSignerAccount();
-  if (!signer) return 0;
+  if (!signer) return { signedCount: 0, errors: ['Wallet unlock required to cosign settlement.'] };
   let signedCount = 0;
+  const errors: string[] = [];
   const resSettle = await fetch(
     `${CLOB_API_BASE}/api/clob/trading-account/pending-settlements?ownerPublicKey=${activeAccount.value.publicKey}`
   );
@@ -2485,13 +2488,14 @@ async function cosignAllPendingSettlements(): Promise<number> {
     if (sData.ok && Array.isArray(sData.settlements)) {
       for (const s of sData.settlements) {
         if (s.status === 'pending_cosign') {
-          const ok = await cosignVerifiedSettlement(s);
-          if (ok) signedCount++;
+          const result = await cosignVerifiedSettlement(s);
+          if (result.ok) signedCount++;
+          else if (result.error) errors.push(result.error);
         }
       }
     }
   }
-  return signedCount;
+  return { signedCount, errors };
 }
 
 async function settlePendingTradesNow() {
@@ -2506,16 +2510,20 @@ async function settlePendingTradesNow() {
   isSettlingPending.value = true;
   withdrawError.value = '';
   try {
-    const count = await cosignAllPendingSettlements();
+    const { signedCount, errors } = await cosignAllPendingSettlements();
     await fetchTradingAccountStatus();
     await syncFromNode();
-    if (count > 0) {
+    if (errors.length > 0 && signedCount === 0) {
+      withdrawError.value = errors[0];
+      showToast('Settlement Failed', errors[0], 'error', 7000);
+    } else if (signedCount > 0) {
       showToast('Settlement Co-Signed!', 'Broadcast to Sirius L1. Withdrawable balance updates once confirmed (~15s).', 'success', 6000);
     } else {
       showToast('Settlement Status Refreshed', 'Waiting for Sirius L1 block confirmation (~15s).', 'info', 4500);
     }
   } catch (err: any) {
     withdrawError.value = err?.message || 'Failed to settle pending trades';
+    showToast('Settlement Error', withdrawError.value, 'error', 6000);
   } finally {
     isSettlingPending.value = false;
   }
@@ -2649,11 +2657,11 @@ async function executeTopUp() {
   }
 }
 
-async function cosignVerifiedSettlement(settlement: any): Promise<boolean> {
-  if (!settlement || !settlement.settlementId || !settlement.aggregatePayload) return false;
-  if (cosigningSettlementIds.has(settlement.settlementId)) return false;
+async function cosignVerifiedSettlement(settlement: any): Promise<{ ok: boolean; txHash?: string; error?: string }> {
+  if (!settlement || !settlement.settlementId || !settlement.aggregatePayload) return { ok: false };
+  if (cosigningSettlementIds.has(settlement.settlementId)) return { ok: false };
   const signer = getSignerAccount();
-  if (!signer) return false;
+  if (!signer) return { ok: false };
 
   cosigningSettlementIds.add(settlement.settlementId);
   try {
@@ -2661,13 +2669,13 @@ async function cosignVerifiedSettlement(settlement: any): Promise<boolean> {
     // Ensure ONLY TransferTransactions exist, and outflows strictly match signed order fills
     const decoded: any = TransactionMapping.createFromPayload(settlement.aggregatePayload);
     if (decoded.type !== TransactionType.AGGREGATE_COMPLETE_V1 && decoded.type !== 16705) {
-      return false;
+      return { ok: false, error: 'Invalid settlement transaction type' };
     }
     const innerTxns = decoded.innerTransactions || [];
     for (const inner of innerTxns) {
       if (inner.type !== TransactionType.TRANSFER && inner.type !== 16724) {
         console.warn('[Settlement Safety] Refused non-transfer inner tx in settlement aggregate');
-        return false;
+        return { ok: false, error: 'Refused non-transfer inner transaction in settlement' };
       }
     }
 
@@ -2698,15 +2706,16 @@ async function cosignVerifiedSettlement(settlement: any): Promise<boolean> {
         5000,
         data.txHash
       );
-      return true;
+      return { ok: true, txHash: data.txHash };
     }
     if (!data.ok) {
       console.warn('[Settlement Cosign] Rejected:', data.error);
+      return { ok: false, error: data.error || 'Settlement cosign rejected by backend' };
     }
-    return false;
-  } catch (err) {
+    return { ok: false };
+  } catch (err: any) {
     console.warn('[Settlement Cosign] Notice:', err);
-    return false;
+    return { ok: false, error: err?.message || 'Failed to cosign settlement' };
   } finally {
     cosigningSettlementIds.delete(settlement.settlementId);
   }
