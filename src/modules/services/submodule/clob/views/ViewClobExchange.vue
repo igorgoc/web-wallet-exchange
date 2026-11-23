@@ -1216,6 +1216,22 @@
             </div>
           </div>
 
+          <div v-if="hasSmartTradingAccount && pendingSettlementNotice" class="pending-settle-banner mb-3">
+            <div class="text-xs text-amber-300 leading-relaxed">
+              ⏳ <strong>{{ pendingSettlementNotice }}</strong>
+              <span class="block text-slate-300 mt-0.5">Pending trade gains cannot be withdrawn until confirmed on Sirius L1 (~15s).</span>
+            </div>
+            <button
+              v-if="(tradingAccountInfo?.pendingSettlementsCount || 0) > 0"
+              type="button"
+              class="settle-now-btn"
+              :disabled="isSettlingPending"
+              @click="settlePendingTradesNow"
+            >
+              {{ isSettlingPending ? 'Settling...' : 'Co-Sign & Settle' }}
+            </button>
+          </div>
+
           <div class="summary-box mb-3 font-mono text-xs">
             <div class="summary-row">
               <span class="text-slate-400">Net You Will Receive</span>
@@ -2269,6 +2285,12 @@ function unlockTradingSession() {
     } else if (pendingAction.value === 'topup') {
       pendingAction.value = null;
       executeTopUp();
+    } else if (pendingAction.value === 'settlePending') {
+      pendingAction.value = null;
+      settlePendingTradesNow();
+    }
+    if (hasSmartTradingAccount.value) {
+      cosignAllPendingSettlements().catch(() => {});
     }
   } catch (err: any) {
     passwordError.value = 'Incorrect wallet password. Please verify your password.';
@@ -2411,10 +2433,92 @@ function getPersonalWalletBalance(asset: ClobAsset): number {
   return personalWalletBnb.value;
 }
 
+const isSettlingPending = ref<boolean>(false);
+
 function getTradingAvailableBalance(asset: ClobAsset): number {
+  const w = tradingAccountInfo.value?.balances?.withdrawable;
+  if (hasSmartTradingAccount.value && w) {
+    const key = asset.toLowerCase();
+    if (w[key] !== undefined && w[key] !== null) {
+      const atomic = Number(w[key]);
+      if (Number.isFinite(atomic)) return atomic / 1_000_000;
+    }
+  }
   if (asset === 'XPX') return userXpxBalance.value;
   if (asset === 'USDT') return userUsdtBalance.value;
   return userBnbBalance.value;
+}
+
+const pendingSettlementNotice = computed(() => {
+  const b = tradingAccountInfo.value?.balances;
+  if (!hasSmartTradingAccount.value || !b) return '';
+  const parts: string[] = [];
+  for (const asset of CLOB_ASSETS) {
+    const k = asset.toLowerCase();
+    const tradeable = Number(b.tradeable?.[k] || 0) / 1_000_000;
+    const withdrawable = Number(b.withdrawable?.[k] || 0) / 1_000_000;
+    const diff = tradeable - withdrawable;
+    if (diff > 0.000001) {
+      parts.push(`+${formatClobAsset(asset, diff)} ${asset}`);
+    }
+  }
+  const cnt = Number(tradingAccountInfo.value?.pendingSettlementsCount || 0);
+  if (parts.length > 0) {
+    return `${parts.join(', ')} awaiting L1 trade settlement (${formatClobAsset('XPX', getTradingAvailableBalance('XPX'))} XPX withdrawable now).`;
+  }
+  if (cnt > 0) {
+    return `${cnt} trade settlement(s) awaiting L1 co-signature / block confirmation.`;
+  }
+  return '';
+});
+
+async function cosignAllPendingSettlements(): Promise<number> {
+  if (!hasSmartTradingAccount.value || !activeAccount.value?.publicKey) return 0;
+  const signer = getSignerAccount();
+  if (!signer) return 0;
+  let signedCount = 0;
+  const resSettle = await fetch(
+    `${CLOB_API_BASE}/api/clob/trading-account/pending-settlements?ownerPublicKey=${activeAccount.value.publicKey}`
+  );
+  if (resSettle.ok) {
+    const sData = await resSettle.json();
+    if (sData.ok && Array.isArray(sData.settlements)) {
+      for (const s of sData.settlements) {
+        if (s.status === 'pending_cosign') {
+          const ok = await cosignVerifiedSettlement(s);
+          if (ok) signedCount++;
+        }
+      }
+    }
+  }
+  return signedCount;
+}
+
+async function settlePendingTradesNow() {
+  if (isSettlingPending.value) return;
+  const signer = getSignerAccount();
+  if (!signer) {
+    pendingAction.value = 'settlePending';
+    showPasswordModal.value = true;
+    passwordError.value = '';
+    return;
+  }
+  isSettlingPending.value = true;
+  withdrawError.value = '';
+  try {
+    const count = await cosignAllPendingSettlements();
+    await fetchTradingAccountStatus();
+    await syncFromNode();
+    if (count > 0) {
+      showToast('Settlement Co-Signed!', 'Broadcast to Sirius L1. Withdrawable balance updates once confirmed (~15s).', 'success', 6000);
+    } else {
+      showToast('Settlement Status Refreshed', 'Waiting for Sirius L1 block confirmation (~15s).', 'info', 4500);
+    }
+  } catch (err: any) {
+    withdrawError.value = err?.message || 'Failed to settle pending trades';
+  } finally {
+    isSettlingPending.value = false;
+  }
 }
 
 function parseAssetAmounts(amountsMap: Record<ClobAsset, string>): Array<{ asset: ClobAsset; amount: number }> {
@@ -2545,11 +2649,11 @@ async function executeTopUp() {
   }
 }
 
-async function cosignVerifiedSettlement(settlement: any) {
-  if (!settlement || !settlement.settlementId || !settlement.aggregatePayload) return;
-  if (cosigningSettlementIds.has(settlement.settlementId)) return;
+async function cosignVerifiedSettlement(settlement: any): Promise<boolean> {
+  if (!settlement || !settlement.settlementId || !settlement.aggregatePayload) return false;
+  if (cosigningSettlementIds.has(settlement.settlementId)) return false;
   const signer = getSignerAccount();
-  if (!signer) return;
+  if (!signer) return false;
 
   cosigningSettlementIds.add(settlement.settlementId);
   try {
@@ -2557,13 +2661,13 @@ async function cosignVerifiedSettlement(settlement: any) {
     // Ensure ONLY TransferTransactions exist, and outflows strictly match signed order fills
     const decoded: any = TransactionMapping.createFromPayload(settlement.aggregatePayload);
     if (decoded.type !== TransactionType.AGGREGATE_COMPLETE_V1 && decoded.type !== 16705) {
-      return;
+      return false;
     }
     const innerTxns = decoded.innerTransactions || [];
     for (const inner of innerTxns) {
       if (inner.type !== TransactionType.TRANSFER && inner.type !== 16724) {
         console.warn('[Settlement Safety] Refused non-transfer inner tx in settlement aggregate');
-        return;
+        return false;
       }
     }
 
@@ -2594,9 +2698,15 @@ async function cosignVerifiedSettlement(settlement: any) {
         5000,
         data.txHash
       );
+      return true;
     }
+    if (!data.ok) {
+      console.warn('[Settlement Cosign] Rejected:', data.error);
+    }
+    return false;
   } catch (err) {
     console.warn('[Settlement Cosign] Notice:', err);
+    return false;
   } finally {
     cosigningSettlementIds.delete(settlement.settlementId);
   }
@@ -2640,6 +2750,7 @@ const isWithdrawValid = computed(() => {
 function openWithdrawModal() {
   withdrawError.value = '';
   withdrawAmounts.value = { XPX: '', USDT: '', BNB: '' };
+  fetchTradingAccountStatus().catch(() => {});
   showWithdrawModal.value = true;
 }
 
@@ -5771,5 +5882,38 @@ onUnmounted(() => {
   background: #1e293b;
   border-color: #38bdf8;
   color: #f8fafc;
+}
+
+.pending-settle-banner {
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.settle-now-btn {
+  background: rgba(245, 158, 11, 0.2);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  color: #fde68a;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 6px 10px;
+  border-radius: 8px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.settle-now-btn:hover:not(:disabled) {
+  background: #d97706;
+  color: #ffffff;
+}
+
+.settle-now-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 </style>
