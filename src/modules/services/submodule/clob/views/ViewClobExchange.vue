@@ -1110,74 +1110,81 @@
       @activated="onTradingAccountActivated"
     />
 
-    <!-- Top-Up Modal: Direct L1 Transfer from Personal Main Wallet to 2-of-2 Smart Trading Account -->
+    <!-- Top-Up Modal: Unified Multi-Mosaic L1 Transfer from Personal Wallet to 2-of-2 Smart Trading Account -->
     <div v-if="showTopUpModal" class="modal-overlay" @click.self="showTopUpModal = false">
       <div class="modal-card">
         <div class="modal-header">
           <div class="modal-title">
             <span class="modal-icon">📥</span>
             <div>
-              <h3>Top Up Smart Trading Account</h3>
-              <p class="modal-subtitle">Direct L1 transfer from Personal Wallet to your 2-of-2 Co-Signed Account</p>
+              <h3>Top Up Trading Account</h3>
+              <p class="modal-subtitle">Send one or more coins in a single L1 transaction (~15–30s confirmation)</p>
             </div>
           </div>
           <button class="modal-close-btn" @click="showTopUpModal = false">✕</button>
         </div>
         <div class="modal-body">
-          <div class="form-group mb-3">
-            <label class="modal-label">Select Asset (Personal Wallet Balance)</label>
-            <div class="flex gap-2">
-              <button type="button" class="pct-btn flex-1" :class="{ active: topUpAsset === 'XPX' }" @click="topUpAsset = 'XPX'">
-                XPX ({{ (personalWalletXpx || 0).toFixed(2) }})
-              </button>
-              <button type="button" class="pct-btn flex-1" :class="{ active: topUpAsset === 'USDT' }" @click="topUpAsset = 'USDT'">
-                USDT ({{ (personalWalletUsdt || 0).toFixed(2) }})
-              </button>
-              <button type="button" class="pct-btn flex-1" :class="{ active: topUpAsset === 'BNB' }" @click="topUpAsset = 'BNB'">
-                BNB ({{ (personalWalletBnb || 0).toFixed(4) }})
-              </button>
+          <div class="multi-asset-list mb-3">
+            <div v-for="asset in CLOB_ASSETS" :key="asset" class="multi-asset-row">
+              <div class="multi-asset-meta">
+                <span class="asset-tag">{{ asset }}</span>
+                <span class="asset-avail">Wallet: {{ formatClobAsset(asset, getPersonalWalletBalance(asset)) }}</span>
+              </div>
+              <div class="multi-asset-controls">
+                <div class="input-box multi-input-box">
+                  <input
+                    type="number"
+                    v-model="topUpAmounts[asset]"
+                    step="any"
+                    min="0"
+                    placeholder="0.00"
+                    class="form-input font-mono"
+                  />
+                  <span class="unit">{{ asset }}</span>
+                </div>
+                <button type="button" class="row-quick-btn" @click="setTopUpPct(asset, 50)">50%</button>
+                <button type="button" class="row-quick-btn" @click="setTopUpPct(asset, 100)">Max</button>
+              </div>
             </div>
           </div>
-          <div class="form-group mb-3">
-            <label class="modal-label">Amount to Transfer</label>
-            <div class="input-box">
-              <input type="number" v-model="topUpAmount" step="any" placeholder="0.00" class="form-input font-mono" />
-              <span class="unit">{{ topUpAsset }}</span>
-            </div>
-          </div>
+
           <div class="summary-box mb-3 font-mono text-xs">
             <div class="summary-row">
-              <span class="text-slate-400">From (Personal)</span>
-              <span class="text-slate-300">{{ activeAccount ? shortAddress(activeAccount.address) : '—' }}</span>
+              <span class="text-slate-400">Transferring</span>
+              <span class="text-emerald-400 font-semibold">{{ topUpSummaryText || 'Enter amount(s) above' }}</span>
             </div>
             <div class="summary-row">
-              <span class="text-slate-400">To (2-of-2 Trading)</span>
-              <span class="text-emerald-400">{{ shortAddress(tradingAccountAddress) }}</span>
+              <span class="text-slate-400">From → To</span>
+              <span class="text-slate-300">{{ activeAccount ? shortAddress(activeAccount.address) : '—' }} → {{ shortAddress(tradingAccountAddress) }}</span>
+            </div>
+            <div class="summary-row">
+              <span class="text-slate-400">Confirmation</span>
+              <span class="text-sky-400">Single Sirius L1 tx (~15–30s)</span>
             </div>
           </div>
           <p v-if="topUpError" class="text-xs text-rose-400 font-medium mb-2">{{ topUpError }}</p>
         </div>
         <div class="modal-footer">
           <button class="btn-cancel" @click="showTopUpModal = false">Cancel</button>
-          <button class="btn-confirm-deposit" :disabled="isToppingUp" @click="executeTopUp">
-            {{ isToppingUp ? 'Broadcasting...' : 'Send to Trading Account' }}
+          <button class="btn-confirm-deposit" :disabled="isToppingUp || !isTopUpValid" @click="executeTopUp">
+            {{ isToppingUp ? 'Broadcasting...' : 'Top Up Selected Coins' }}
           </button>
         </div>
       </div>
     </div>
 
-    <!-- Withdrawal Modal with Network Fee & Net Received Transparency -->
+    <!-- Withdrawal Modal: Unified Multi-Mosaic Co-Signed Withdrawal to Personal Wallet -->
     <div v-if="showWithdrawModal" class="modal-overlay" @click.self="showWithdrawModal = false">
       <div class="modal-card">
         <div class="modal-header">
           <div class="modal-title">
             <span class="modal-icon">💸</span>
             <div>
-              <h3>{{ hasSmartTradingAccount ? 'Co-Signed Withdrawal to Personal Wallet' : 'Withdraw to Sirius Wallet' }}</h3>
+              <h3>{{ hasSmartTradingAccount ? 'Withdraw to Personal Wallet' : 'Withdraw to Sirius Wallet' }}</h3>
               <p class="modal-subtitle">
                 {{ hasSmartTradingAccount
-                  ? 'Signed by you (Cosigner 1) + 2-of-3 Distributed Validators (Cosigner 2)'
-                  : 'Transfer funds from CLOB Vault to your on-chain Sirius account' }}
+                  ? 'Withdraw XPX, USDT, and BNB together in one 2-of-2 L1 transaction (~15–30s)'
+                  : 'Transfer available funds from CLOB Vault to your Sirius account' }}
               </p>
             </div>
           </div>
@@ -1185,71 +1192,40 @@
         </div>
 
         <div class="modal-body">
-          <!-- Select Asset -->
-          <div class="form-group mb-3">
-            <label class="modal-label">Select Asset</label>
-            <div class="flex gap-2">
-              <button 
-                type="button" 
-                class="pct-btn flex-1" 
-                :class="{ active: withdrawAsset === 'XPX' }" 
-                @click="withdrawAsset = 'XPX'"
-              >
-                XPX ({{ (userXpxBalance || 0).toFixed(2) }})
-              </button>
-              <button 
-                type="button" 
-                class="pct-btn flex-1" 
-                :class="{ active: withdrawAsset === 'USDT' }" 
-                @click="withdrawAsset = 'USDT'"
-              >
-                USDT ({{ (userUsdtBalance || 0).toFixed(2) }})
-              </button>
-              <button 
-                type="button" 
-                class="pct-btn flex-1" 
-                :class="{ active: withdrawAsset === 'BNB' }" 
-                @click="withdrawAsset = 'BNB'"
-              >
-                BNB ({{ (userBnbBalance || 0).toFixed(4) }})
-              </button>
+          <div class="multi-asset-list mb-3">
+            <div v-for="asset in CLOB_ASSETS" :key="asset" class="multi-asset-row">
+              <div class="multi-asset-meta">
+                <span class="asset-tag">{{ asset }}</span>
+                <span class="asset-avail">Avail: {{ formatClobAsset(asset, getTradingAvailableBalance(asset)) }}</span>
+              </div>
+              <div class="multi-asset-controls">
+                <div class="input-box multi-input-box">
+                  <input
+                    type="number"
+                    v-model="withdrawAmounts[asset]"
+                    step="any"
+                    min="0"
+                    placeholder="0.00"
+                    class="form-input font-mono"
+                  />
+                  <span class="unit">{{ asset }}</span>
+                </div>
+                <button type="button" class="row-quick-btn" @click="setWithdrawAssetPct(asset, 50)">50%</button>
+                <button type="button" class="row-quick-btn" @click="setWithdrawAssetPct(asset, 100)">Max</button>
+              </div>
             </div>
           </div>
 
-          <!-- Amount Input -->
-          <div class="form-group mb-3">
-            <div class="flex justify-between items-center mb-1">
-              <label class="modal-label">Withdrawal Amount</label>
-              <span class="text-xs text-slate-400 font-mono">
-                Min: &gt; {{ withdrawalNetworkFee }} {{ withdrawAsset }}
-              </span>
-            </div>
-            <div class="input-box">
-              <input 
-                type="number" 
-                v-model="withdrawAmount" 
-                step="any" 
-                placeholder="0.00" 
-                class="form-input font-mono"
-              />
-              <span class="unit">{{ withdrawAsset }}</span>
-            </div>
-            <div class="pct-grid mt-2">
-              <button v-for="pct in [25, 50, 75, 100]" :key="pct" class="pct-btn" @click="setWithdrawPct(pct)">
-                {{ pct }}%
-              </button>
-            </div>
-          </div>
-
-          <!-- Network Fee & Net Received Breakdown -->
           <div class="summary-box mb-3 font-mono text-xs">
             <div class="summary-row">
-              <span class="text-slate-400">Network Withdrawal Fee</span>
-              <span class="text-amber-400 font-semibold">{{ withdrawalNetworkFee }} {{ withdrawAsset }}</span>
+              <span class="text-slate-400">Net You Will Receive</span>
+              <span class="text-emerald-400 font-bold">{{ withdrawSummaryText || 'Enter amount(s) above' }}</span>
             </div>
             <div class="summary-row">
-              <span class="text-slate-400">Net You Will Receive</span>
-              <span class="text-emerald-400 font-bold">{{ netWithdrawAmount > 0 ? (withdrawAsset === 'BNB' ? netWithdrawAmount.toFixed(4) : netWithdrawAmount.toFixed(2)) : '0.00' }} {{ withdrawAsset }}</span>
+              <span class="text-slate-400">Exchange Fee</span>
+              <span class="text-amber-400 font-semibold">
+                {{ hasSmartTradingAccount ? '0 (L1 gas only)' : '1 XPX / 1 USDT / 0.001 BNB per asset' }}
+              </span>
             </div>
             <div class="summary-row">
               <span class="text-slate-400">Recipient Account</span>
@@ -1268,7 +1244,7 @@
             @click="executeWithdraw"
           >
             <span v-if="isWithdrawing">Processing Withdrawal...</span>
-            <span v-else>Confirm &amp; Withdraw</span>
+            <span v-else>Withdraw Selected Coins</span>
           </button>
         </div>
       </div>
@@ -2301,12 +2277,14 @@ function unlockTradingSession() {
 }
 
 // === Solution 2 (Model A): Native Co-Signed Smart Trading Account State & Operations ===
+type ClobAsset = 'XPX' | 'USDT' | 'BNB';
+const CLOB_ASSETS: ClobAsset[] = ['XPX', 'USDT', 'BNB'];
+
 const tradingAccountInfo = ref<any>(null);
 const validatorClusterInfo = ref<any>(null);
 const showTradingSetupModal = ref<boolean>(false);
 const showTopUpModal = ref<boolean>(false);
-const topUpAsset = ref<'XPX' | 'USDT' | 'BNB'>('XPX');
-const topUpAmount = ref<string>('');
+const topUpAmounts = ref<Record<ClobAsset, string>>({ XPX: '', USDT: '', BNB: '' });
 const isToppingUp = ref<boolean>(false);
 const topUpError = ref<string>('');
 const cosigningSettlementIds = new Set<string>();
@@ -2423,9 +2401,70 @@ function onTradingAccountActivated(res: any) {
   }, 2500);
 }
 
+function formatClobAsset(asset: ClobAsset, val: number): string {
+  return (Number(val) || 0).toFixed(asset === 'BNB' ? 4 : 2);
+}
+
+function getPersonalWalletBalance(asset: ClobAsset): number {
+  if (asset === 'XPX') return personalWalletXpx.value;
+  if (asset === 'USDT') return personalWalletUsdt.value;
+  return personalWalletBnb.value;
+}
+
+function getTradingAvailableBalance(asset: ClobAsset): number {
+  if (asset === 'XPX') return userXpxBalance.value;
+  if (asset === 'USDT') return userUsdtBalance.value;
+  return userBnbBalance.value;
+}
+
+function parseAssetAmounts(amountsMap: Record<ClobAsset, string>): Array<{ asset: ClobAsset; amount: number }> {
+  const entries: Array<{ asset: ClobAsset; amount: number }> = [];
+  for (const asset of CLOB_ASSETS) {
+    const val = parseFloat(amountsMap[asset]);
+    if (!isNaN(val) && val > 0) {
+      entries.push({ asset, amount: val });
+    }
+  }
+  return entries;
+}
+
+function buildSortedMosaics(entries: Array<{ asset: ClobAsset; amount: number }>): Mosaic[] {
+  return entries
+    .map((e) => {
+      const hex = getMosaicHexForAsset(e.asset);
+      const atomicAmt = BigInt(Math.round(e.amount * 1_000_000));
+      return {
+        idBigInt: BigInt('0x' + hex),
+        mosaic: new Mosaic(new MosaicId(hex), UInt64.fromHex(atomicAmt.toString(16).padStart(16, '0'))),
+      };
+    })
+    .sort((a, b) => (a.idBigInt < b.idBigInt ? -1 : a.idBigInt > b.idBigInt ? 1 : 0))
+    .map((item) => item.mosaic);
+}
+
+const topUpSelectedEntries = computed(() => parseAssetAmounts(topUpAmounts.value));
+
+const topUpSummaryText = computed(() =>
+  topUpSelectedEntries.value.map((e) => `${formatClobAsset(e.asset, e.amount)} ${e.asset}`).join(' + ')
+);
+
+const isTopUpValid = computed(() => {
+  if (topUpSelectedEntries.value.length === 0) return false;
+  return topUpSelectedEntries.value.every((e) => e.amount <= getPersonalWalletBalance(e.asset));
+});
+
+function setTopUpPct(asset: ClobAsset, pct: number) {
+  let avail = getPersonalWalletBalance(asset);
+  if (asset === 'XPX' && pct === 100 && avail > 0.2) {
+    avail = Math.max(0, avail - 0.2); // Reserve XPX for L1 network fee
+  }
+  const val = (avail * pct) / 100;
+  topUpAmounts.value[asset] = val > 0 ? formatClobAsset(asset, val) : '';
+}
+
 function openTopUpModal() {
   topUpError.value = '';
-  topUpAmount.value = '';
+  topUpAmounts.value = { XPX: '', USDT: '', BNB: '' };
   showTopUpModal.value = true;
 }
 
@@ -2435,10 +2474,17 @@ async function executeTopUp() {
     topUpError.value = 'Smart Trading Account is not active yet.';
     return;
   }
-  const amt = parseFloat(topUpAmount.value);
-  if (isNaN(amt) || amt <= 0) {
-    topUpError.value = 'Enter a valid amount greater than 0.';
+  const entries = parseAssetAmounts(topUpAmounts.value);
+  if (entries.length === 0) {
+    topUpError.value = 'Enter an amount for at least one coin.';
     return;
+  }
+  for (const e of entries) {
+    const avail = getPersonalWalletBalance(e.asset);
+    if (e.amount > avail) {
+      topUpError.value = `Requested ${e.amount} ${e.asset} exceeds wallet balance (${formatClobAsset(e.asset, avail)} ${e.asset}).`;
+      return;
+    }
   }
   const signer = getSignerAccount();
   if (!signer) {
@@ -2453,19 +2499,16 @@ async function executeTopUp() {
   try {
     const netId = getActiveNetworkId();
     const genHash = getActiveGenerationHash();
-    const mosaicHex = getMosaicHexForAsset(topUpAsset.value);
-    const atomicAmt = BigInt(Math.round(amt * 1_000_000));
-    const mosaic = new Mosaic(
-      new MosaicId(mosaicHex),
-      UInt64.fromHex(atomicAmt.toString(16).padStart(16, '0'))
-    );
+    const mosaics = buildSortedMosaics(entries);
+    const summaryLabel = entries.map((e) => `${e.amount} ${e.asset}`).join(' + ');
+
     const tx = TransferTransaction.create(
       Deadline.create(),
       Address.createFromRawAddress(tradingAccountAddress.value),
-      [mosaic],
+      mosaics,
       PlainMessage.create('SiriusCLOB: Trading Account Top-Up'),
       netId,
-      UInt64.fromUint(100000)
+      UInt64.fromUint(200000)
     );
     const signedTx = signer.preV2Sign(tx, genHash);
     const endpoint = getActiveSiriusNodeEndpoint();
@@ -2480,20 +2523,20 @@ async function executeTopUp() {
     }
     showToast(
       'Top-Up Broadcast!',
-      `Sent ${amt} ${topUpAsset.value} directly to your 2-of-2 Smart Trading Account. Confirming in ~15s.`,
+      `Sent ${summaryLabel} in one L1 transaction to your Trading Account. Confirming in ~15–30s.`,
       'success',
       6000,
       signedTx.hash
     );
     showTopUpModal.value = false;
-    topUpAmount.value = '';
+    topUpAmounts.value = { XPX: '', USDT: '', BNB: '' };
     let polls = 0;
     const poller = setInterval(async () => {
       polls++;
       await fetchTradingAccountStatus();
       await syncFromNode();
-      if (polls >= 10) clearInterval(poller);
-    }, 3000);
+      if (polls >= 12) clearInterval(poller);
+    }, 2500);
   } catch (err: any) {
     topUpError.value = err?.message || 'Top-up transfer failed';
     showToast('Top-Up Failed', topUpError.value, 'error');
@@ -2562,68 +2605,68 @@ async function cosignVerifiedSettlement(settlement: any) {
 const isSubmitting = ref(false);
 const isFlushingBatch = ref(false);
 
-// Withdrawal State & Operations
+// Withdrawal State & Operations (Unified Multi-Mosaic)
 const showWithdrawModal = ref<boolean>(false);
-const withdrawAsset = ref<'XPX' | 'USDT' | 'BNB'>('XPX');
-const withdrawAmount = ref<string>('');
+const withdrawAmounts = ref<Record<ClobAsset, string>>({ XPX: '', USDT: '', BNB: '' });
 const isWithdrawing = ref<boolean>(false);
 const withdrawError = ref<string>('');
 
-const withdrawalNetworkFee = computed(() => {
+function getAssetWithdrawFee(asset: ClobAsset): number {
   if (hasSmartTradingAccount.value) return 0; // Native L1 gas only, 0 exchange fee!
-  if (withdrawAsset.value === 'BNB') return 0.001;
-  return 1.0;
-});
+  return asset === 'BNB' ? 0.001 : 1.0;
+}
 
-const netWithdrawAmount = computed(() => {
-  const amt = parseFloat(withdrawAmount.value) || 0;
-  const fee = withdrawalNetworkFee.value;
-  return Math.max(0, amt - fee);
+const withdrawSelectedEntries = computed(() => parseAssetAmounts(withdrawAmounts.value));
+
+const withdrawSummaryText = computed(() => {
+  if (withdrawSelectedEntries.value.length === 0) return '';
+  return withdrawSelectedEntries.value
+    .map((e) => {
+      const net = Math.max(0, e.amount - getAssetWithdrawFee(e.asset));
+      return `${formatClobAsset(e.asset, net)} ${e.asset}`;
+    })
+    .join(' + ');
 });
 
 const isWithdrawValid = computed(() => {
-  const amt = parseFloat(withdrawAmount.value);
-  if (isNaN(amt) || amt <= withdrawalNetworkFee.value) return false;
-  const maxAvail = withdrawAsset.value === 'XPX'
-    ? userXpxBalance.value
-    : withdrawAsset.value === 'USDT'
-      ? userUsdtBalance.value
-      : userBnbBalance.value;
-  return amt <= maxAvail;
+  if (withdrawSelectedEntries.value.length === 0) return false;
+  return withdrawSelectedEntries.value.every((e) => {
+    const fee = getAssetWithdrawFee(e.asset);
+    const maxAvail = getTradingAvailableBalance(e.asset);
+    return e.amount > fee && e.amount <= maxAvail;
+  });
 });
 
 function openWithdrawModal() {
   withdrawError.value = '';
-  withdrawAmount.value = '';
+  withdrawAmounts.value = { XPX: '', USDT: '', BNB: '' };
   showWithdrawModal.value = true;
 }
 
-function setWithdrawPct(pct: number) {
-  const maxAvail = withdrawAsset.value === 'XPX'
-    ? userXpxBalance.value
-    : withdrawAsset.value === 'USDT'
-      ? userUsdtBalance.value
-      : userBnbBalance.value;
+function setWithdrawAssetPct(asset: ClobAsset, pct: number) {
+  const maxAvail = getTradingAvailableBalance(asset);
   const val = (maxAvail * pct) / 100;
-  withdrawAmount.value = (withdrawAsset.value === 'BNB' ? val.toFixed(4) : val.toFixed(2));
+  withdrawAmounts.value[asset] = val > 0 ? formatClobAsset(asset, val) : '';
 }
 
 async function executeWithdraw() {
   if (isWithdrawing.value) return;
-  const amt = parseFloat(withdrawAmount.value);
-  const fee = withdrawalNetworkFee.value;
-  if (isNaN(amt) || amt <= fee) {
-    withdrawError.value = `Withdrawal amount must be strictly greater than network fee (${fee} ${withdrawAsset.value})`;
+  const entries = parseAssetAmounts(withdrawAmounts.value);
+  if (entries.length === 0) {
+    withdrawError.value = 'Enter a withdrawal amount for at least one coin.';
     return;
   }
-  const maxAvail = withdrawAsset.value === 'XPX'
-    ? userXpxBalance.value
-    : withdrawAsset.value === 'USDT'
-      ? userUsdtBalance.value
-      : userBnbBalance.value;
-  if (amt > maxAvail) {
-    withdrawError.value = `Requested amount exceeds available balance (${maxAvail.toFixed(2)} ${withdrawAsset.value})`;
-    return;
+  for (const e of entries) {
+    const fee = getAssetWithdrawFee(e.asset);
+    if (e.amount <= fee) {
+      withdrawError.value = `${e.asset} amount must be strictly greater than fee (${fee} ${e.asset}).`;
+      return;
+    }
+    const maxAvail = getTradingAvailableBalance(e.asset);
+    if (e.amount > maxAvail) {
+      withdrawError.value = `Requested ${e.amount} ${e.asset} exceeds available balance (${formatClobAsset(e.asset, maxAvail)} ${e.asset}).`;
+      return;
+    }
   }
 
   const signer = getSignerAccount();
@@ -2638,22 +2681,18 @@ async function executeWithdraw() {
   withdrawError.value = '';
   const netId = getActiveNetworkId();
   const cleanAddr = (activeAccount.value?.address || '').replace(/[- ]/g, '').toUpperCase();
+  const summaryLabel = entries.map((e) => `${e.amount} ${e.asset}`).join(' + ');
 
   try {
-    // Solution 2 (Model A): Native Co-Signed Non-Custodial Withdrawal from 2-of-2 Trading Account
+    // Solution 2 (Model A): Single Atomic Multi-Mosaic Co-Signed Withdrawal from 2-of-2 Trading Account
     if (hasSmartTradingAccount.value && tradingAccountPublicKey.value) {
       const genHash = getActiveGenerationHash();
-      const mosaicHex = getMosaicHexForAsset(withdrawAsset.value);
-      const atomicAmt = BigInt(Math.round(amt * 1_000_000));
-      const mosaic = new Mosaic(
-        new MosaicId(mosaicHex),
-        UInt64.fromHex(atomicAmt.toString(16).padStart(16, '0'))
-      );
+      const mosaics = buildSortedMosaics(entries);
       const tradingPubAcc = PublicAccount.createFromPublicKey(tradingAccountPublicKey.value, netId);
       const innerTx = TransferTransaction.create(
         Deadline.create(),
         Address.createFromRawAddress(cleanAddr),
-        [mosaic],
+        mosaics,
         PlainMessage.create('SiriusCLOB: Co-Signed Withdrawal'),
         netId
       ).toAggregateV1(tradingPubAcc);
@@ -2663,7 +2702,7 @@ async function executeWithdraw() {
         [innerTx],
         netId,
         [],
-        UInt64.fromUint(200000)
+        UInt64.fromUint(250000)
       );
 
       // User signs as outer initiator (satisfies Cosigner 1 of the 2-of-2 Trading Account)
@@ -2684,13 +2723,13 @@ async function executeWithdraw() {
         const nodesLabel = Array.isArray(data.approvedByNodes) ? data.approvedByNodes.join(', ') : '2-of-3 Validators';
         showToast(
           'Co-Signed Withdrawal Broadcast!',
-          `Withdrew ${amt} ${withdrawAsset.value} directly from your 2-of-2 Trading Account to Personal Wallet.\nCo-signed by: ${nodesLabel}`,
+          `Withdrew ${summaryLabel} in one L1 transaction to Personal Wallet.\nCo-signed by: ${nodesLabel}`,
           'success',
           6500,
           data.txHash
         );
         showWithdrawModal.value = false;
-        withdrawAmount.value = '';
+        withdrawAmounts.value = { XPX: '', USDT: '', BNB: '' };
         fetchTradingAccountStatus().catch(() => {});
         syncFromNode().catch(() => {});
       } else {
@@ -2700,50 +2739,50 @@ async function executeWithdraw() {
       return;
     }
 
-    // Legacy Vault Withdrawal Path
-    const now = Date.now();
-    const nonce = generateSecureNonce(now);
-    const expiry = now + PASSWORD_EXPIRY_MS;
-    const formattedAmt = withdrawAsset.value === 'BNB' ? amt.toFixed(6) : amt.toFixed(6);
-    const withdrawMsg = `${netId}:SiriusCLOB-v1:WITHDRAW:${withdrawAsset.value}:${formattedAmt}:${cleanAddr}:${nonce}:${expiry}`;
-    const signature = signer.signData(withdrawMsg);
+    // Legacy Vault Withdrawal Path (iterates selected assets)
+    const completedAssets: string[] = [];
+    for (const e of entries) {
+      const now = Date.now();
+      const nonce = generateSecureNonce(now);
+      const expiry = now + PASSWORD_EXPIRY_MS;
+      const formattedAmt = e.amount.toFixed(6);
+      const withdrawMsg = `${netId}:SiriusCLOB-v1:WITHDRAW:${e.asset}:${formattedAmt}:${cleanAddr}:${nonce}:${expiry}`;
+      const signature = signer.signData(withdrawMsg);
 
-    const res = await fetch(`${CLOB_API_BASE}/api/clob/withdraw`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        asset: withdrawAsset.value,
-        mosaic: withdrawAsset.value,
-        amount: formattedAmt,
-        recipient: cleanAddr,
-        publicKey: signer.publicKey,
-        nonce,
-        expiry,
-        signature,
-      }),
-    });
-
-    const data = await res.json();
-    if (data.ok) {
-      if (data.balances) {
-        applyBalances(data.balances);
+      const res = await fetch(`${CLOB_API_BASE}/api/clob/withdraw`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          asset: e.asset,
+          mosaic: e.asset,
+          amount: formattedAmt,
+          recipient: cleanAddr,
+          publicKey: signer.publicKey,
+          nonce,
+          expiry,
+          signature,
+        }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        throw new Error(data.error || `${e.asset} withdrawal failed`);
       }
-      showToast(
-        'Withdrawal Broadcast',
-        `Withdrew ${formattedAmt} ${withdrawAsset.value}. Net received: ${data.netPayout || (amt - fee).toFixed(2)} ${withdrawAsset.value} (${fee} ${withdrawAsset.value} network fee deducted).`,
-        'success',
-        6000
-      );
-      showWithdrawModal.value = false;
-      withdrawAmount.value = '';
-      syncFromNode().catch(() => {});
-    } else {
-      withdrawError.value = data.error || 'Withdrawal failed';
-      showToast('Withdrawal Failed', data.error || 'Server rejected withdrawal', 'error');
+      if (data.balances) applyBalances(data.balances);
+      completedAssets.push(`${e.amount} ${e.asset}`);
     }
+
+    showToast(
+      'Withdrawal Broadcast',
+      `Withdrew ${completedAssets.join(' + ')} to your Sirius account.`,
+      'success',
+      6000
+    );
+    showWithdrawModal.value = false;
+    withdrawAmounts.value = { XPX: '', USDT: '', BNB: '' };
+    syncFromNode().catch(() => {});
   } catch (err: any) {
-    withdrawError.value = err.message || 'Network error';
-    showToast('Withdrawal Error', err.message || 'Failed to submit withdrawal', 'error');
+    withdrawError.value = err.message || 'Withdrawal failed';
+    showToast('Withdrawal Error', withdrawError.value, 'error');
   } finally {
     isWithdrawing.value = false;
   }
@@ -5664,5 +5703,73 @@ onUnmounted(() => {
   border-color: transparent;
   color: #ffffff;
   transform: translateY(-1px);
+}
+
+/* Unified Multi-Mosaic Top-Up / Withdrawal Rows */
+.multi-asset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.multi-asset-row {
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid #1e293b;
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.multi-asset-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.asset-tag {
+  font-size: 12px;
+  font-weight: 800;
+  color: #f8fafc;
+  letter-spacing: 0.03em;
+}
+
+.asset-avail {
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #94a3b8;
+}
+
+.multi-asset-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.multi-input-box {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+}
+
+.row-quick-btn {
+  height: 32px;
+  padding: 0 9px;
+  border-radius: 8px;
+  background: #0f172a;
+  border: 1px solid #334155;
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.row-quick-btn:hover {
+  background: #1e293b;
+  border-color: #38bdf8;
+  color: #f8fafc;
 }
 </style>
