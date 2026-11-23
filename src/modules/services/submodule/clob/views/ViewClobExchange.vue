@@ -1308,6 +1308,8 @@ import {
   AggregateTransaction,
   CosignatureTransaction,
   Deadline,
+  DerivationScheme,
+  KeyPair,
   Mosaic,
   MosaicId,
   Password,
@@ -2357,6 +2359,23 @@ const topUpAmounts = ref<Record<ClobAsset, string>>({ XPX: '', USDT: '', BNB: ''
 const isToppingUp = ref<boolean>(false);
 const topUpError = ref<string>('');
 const cosigningSettlementIds = new Set<string>();
+const recentSignedOrders = new Map<string, { pair: string; side: 'buy' | 'sell'; price: string; amount: string }>();
+
+function hexToUint8(hex: string): Uint8Array {
+  const clean = hex.replace(/^0x/i, '');
+  const out = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < out.length; i++) {
+    out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
+function parseDecBigInt(valStr: string | number, decimals: number): bigint {
+  const clean = String(valStr ?? '0').trim();
+  const [intPart, fracPart = ''] = clean.split('.');
+  const padded = (fracPart + '0'.repeat(decimals)).slice(0, decimals);
+  return BigInt((intPart.replace(/[^0-9]/g, '') || '0') + padded);
+}
 
 const hasSmartTradingAccount = computed(() => {
   return Boolean(tradingAccountInfo.value?.hasTradingAccount && tradingAccountInfo.value?.status === 'active');
@@ -2737,10 +2756,116 @@ async function cosignVerifiedSettlement(settlement: any): Promise<{ ok: boolean;
       return { ok: false, error: 'Invalid settlement transaction type' };
     }
     const innerTxns = decoded.innerTransactions || [];
+    const ownerPubUpper = String(signer.publicKey || '').toUpperCase();
+    const tradingPubUpper = String(tradingAccountPublicKey.value || settlement.tradingPublicKey || '').toUpperCase();
+    const tradingAddrUpper = normalizeAddrStr(tradingAccountAddress.value);
+    const outByHex = new Map<string, bigint>();
+    const inByHex = new Map<string, bigint>();
+
     for (const inner of innerTxns) {
       if (inner.type !== TransactionType.TRANSFER && inner.type !== 16724) {
         console.warn('[Settlement Safety] Refused non-transfer inner tx in settlement aggregate');
         return { ok: false, error: 'Refused non-transfer inner transaction in settlement' };
+      }
+      const sPub = String(inner.signer?.publicKey || '').toUpperCase();
+      if (ownerPubUpper && sPub === ownerPubUpper && tradingPubUpper !== ownerPubUpper) {
+        return { ok: false, error: 'Security block: Settlement attempted to spend directly from personal Main Wallet' };
+      }
+      const recipObj = inner.recipient || inner.recipientAddress;
+      const rAddr = recipObj && typeof recipObj.plain === 'function' ? normalizeAddrStr(recipObj.plain()) : '';
+      for (const m of (inner.mosaics || [])) {
+        const mHex = m.id.toHex().toUpperCase();
+        const amt = BigInt(m.amount.compact ? m.amount.compact() : m.amount);
+        if (tradingPubUpper && sPub === tradingPubUpper) {
+          outByHex.set(mHex, (outByHex.get(mHex) || 0n) + amt);
+        }
+        if (tradingAddrUpper && rAddr === tradingAddrUpper) {
+          inByHex.set(mHex, (inByHex.get(mHex) || 0n) + amt);
+        }
+      }
+    }
+
+    // Gap B verification: never blind-sign outflows from Trading Account without verifying against own signed order
+    if (outByHex.size > 0) {
+      let verifiedOrd: { pair: string; side: 'buy' | 'sell'; price: string; amount: string } | null = null;
+      const ctx = settlement.orderContext;
+      if (ctx && ctx.signature && ctx.nonce && ctx.expiry) {
+        const domainSep = String(ctx.domainSeparator || `${getActiveNetworkId()}:SiriusCLOB-v1`);
+        const normPair = String(ctx.pair || 'XPX/USDT').toUpperCase().replace('_', '/');
+        const normSide = String(ctx.side || '').toLowerCase() === 'sell' ? 'sell' : 'buy';
+        const normType = String(ctx.type || '') === 'Market' ? 'Market' : 'Limit';
+        const msg = `${domainSep}:ORDER:${normPair}:${normSide}:${normType}:${String(ctx.price)}:${String(ctx.amount)}:${ctx.nonce}:${ctx.expiry}`;
+        const sigOk = KeyPair.verify(
+          hexToUint8(ownerPubUpper),
+          new TextEncoder().encode(msg),
+          hexToUint8(String(ctx.signature)),
+          DerivationScheme.Ed25519Sha3
+        );
+        if (!sigOk) {
+          return { ok: false, error: 'Security block: Invalid order signature inside settlement context' };
+        }
+        verifiedOrd = { pair: normPair, side: normSide, price: String(ctx.price), amount: String(ctx.amount) };
+      } else if (settlement.orderId && recentSignedOrders.has(String(settlement.orderId))) {
+        verifiedOrd = recentSignedOrders.get(String(settlement.orderId)) || null;
+      } else if (settlement.orderId) {
+        const openMatch: any = myOpenOrders.value.find((o: any) => String(o.id) === String(settlement.orderId));
+        if (openMatch) {
+          verifiedOrd = {
+            pair: String(openMatch.pair || selectedPair.value).toUpperCase().replace('_', '/'),
+            side: String(openMatch.side || '').toLowerCase() === 'sell' ? 'sell' : 'buy',
+            price: String(openMatch.price || '0'),
+            amount: String(openMatch.amount || '0'),
+          };
+        }
+      }
+
+      if (!verifiedOrd) {
+        return { ok: false, error: 'Security block: Could not verify settlement against a locally signed order' };
+      }
+
+      const xpxHex = getMosaicHexForAsset('XPX').toUpperCase();
+      const quoteSym: ClobAsset = verifiedOrd.pair.endsWith('/BNB') ? 'BNB' : 'USDT';
+      const quoteHex = getMosaicHexForAsset(quoteSym).toUpperCase();
+      const outXpx = outByHex.get(xpxHex) || 0n;
+      const outQuote = outByHex.get(quoteHex) || 0n;
+      const inXpx = inByHex.get(xpxHex) || 0n;
+      const inQuote = inByHex.get(quoteHex) || 0n;
+
+      for (const [hex] of outByHex.entries()) {
+        if (hex !== xpxHex && hex !== quoteHex) {
+          return { ok: false, error: `Security block: Unexpected mosaic ${hex} leaving Trading Account` };
+        }
+      }
+
+      const ordAmt = parseDecBigInt(verifiedOrd.amount, 6);
+      const ordPriceTicks = parseDecBigInt(verifiedOrd.price, 8);
+      const PRICE_SCALE = 100_000_000n;
+
+      if (verifiedOrd.side === 'buy') {
+        if (outXpx > 0n) {
+          return { ok: false, error: 'Security block: BUY settlement tried to send XPX out of Trading Account' };
+        }
+        const maxQuote = ((ordAmt * ordPriceTicks + PRICE_SCALE - 1n) / PRICE_SCALE) * 102n / 100n + 1000n;
+        if (outQuote > maxQuote) {
+          return { ok: false, error: 'Security block: BUY settlement quote outflow exceeds your signed order limit' };
+        }
+        if (outQuote > 0n && inXpx === 0n) {
+          return { ok: false, error: 'Security block: BUY settlement sends quote without delivering XPX' };
+        }
+      } else {
+        if (outQuote > 0n) {
+          return { ok: false, error: 'Security block: SELL settlement tried to send quote out of Trading Account' };
+        }
+        const maxXpx = (ordAmt * 102n) / 100n + 1000n;
+        if (outXpx > maxXpx) {
+          return { ok: false, error: 'Security block: SELL settlement XPX outflow exceeds your signed order amount' };
+        }
+        if (outXpx > 0n && ordPriceTicks > 0n) {
+          const minQuote = ((outXpx * ordPriceTicks) / PRICE_SCALE) * 97n / 100n;
+          if (minQuote >= 100n && inQuote < minQuote) {
+            return { ok: false, error: 'Security block: SELL settlement payout below signed limit price' };
+          }
+        }
       }
     }
 
@@ -3109,6 +3234,14 @@ async function submitOrder() {
 
     const data = await res.json();
     if (data.ok) {
+      if (data.orderId) {
+        recentSignedOrders.set(String(data.orderId), {
+          pair: normPair,
+          side: normSide,
+          price: priceStr,
+          amount: amountStr,
+        });
+      }
       applyBalances(data.balances);
 
       // Immediately co-sign atomic L1 trade settlement if user's Smart Trading Account filled
