@@ -2795,6 +2795,10 @@ async function executeWithdraw() {
   const summaryLabel = entries.map((e) => `${e.amount} ${e.asset}`).join(' + ');
 
   try {
+    // Ensure Smart Trading Account status is loaded before routing between 2-of-2 co-signed vs legacy vault
+    if (!tradingAccountInfo.value) {
+      await fetchTradingAccountStatus().catch(() => {});
+    }
     // Solution 2 (Model A): Single Atomic Multi-Mosaic Co-Signed Withdrawal from 2-of-2 Trading Account
     if (hasSmartTradingAccount.value && tradingAccountPublicKey.value) {
       const genHash = getActiveGenerationHash();
