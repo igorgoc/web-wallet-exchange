@@ -3112,19 +3112,31 @@ async function submitOrder() {
       applyBalances(data.balances);
 
       // Immediately co-sign atomic L1 trade settlement if user's Smart Trading Account filled
+      let settleRes: { ok: boolean; txHash?: string; error?: string } | null = null;
       if (data.pendingSettlement) {
-        cosignVerifiedSettlement(data.pendingSettlement).catch(() => {});
+        settleRes = await cosignVerifiedSettlement(data.pendingSettlement).catch((e: any) => ({
+          ok: false,
+          error: e?.message || 'Settlement co-signing failed',
+        }));
       }
 
       const orderId = data.orderId || ++nextOrderId;
-      if (data.fillsCount > 0) {
-        const txMsg = data.settlementTxHash ? `\n🔗 Catapult Settlement Tx: ${data.settlementTxHash.slice(0, 16)}...` : '';
+      if (settleRes && !settleRes.ok && settleRes.error) {
+        showToast(
+          'Trade Matched — L1 Settlement Failed',
+          `Order #${orderId} matched, but Sirius L1 rejected settlement:\n${settleRes.error}`,
+          'error',
+          7500
+        );
+      } else if (data.fillsCount > 0) {
+        const txHashToShow = settleRes?.txHash || data.settlementTxHash;
+        const txMsg = txHashToShow ? `\n🔗 Catapult Settlement Tx: ${txHashToShow.slice(0, 16)}...` : '';
         showToast(
           'Trade Executed!',
           `${data.type} ${data.side} order matched via 3/3 BFT Consensus on ${selectedPair.value}!\nExchange balance updated! Click 'Withdraw' to move coins to your L1 wallet anytime.${txMsg}`,
           'trade',
           5000,
-          data.settlementTxHash
+          txHashToShow
         );
       } else if (orderType.value === 'Market') {
         showToast(
