@@ -78,13 +78,40 @@
       <div class="header-right">
         <!-- User Active Wallet & Tradeable Balance Area (Desktop) -->
         <div class="wallet-balance-area font-mono mobile-hide" v-if="activeAccount">
-          <span class="wallet-addr">{{ shortAddress(activeAccount.address) }}</span>
+          <template v-if="hasSmartTradingAccount">
+            <span class="smart-acc-badge" :title="`Native 2-of-2 Co-Signed Smart Trading Account: ${tradingAccountAddress}`">
+              🛡️ Smart Trading ({{ shortAddress(tradingAccountAddress) }})
+            </span>
+          </template>
+          <template v-else-if="isTradingAccountPending">
+            <span class="smart-acc-pending" title="2-of-2 Multisig activation confirming on Sirius L1 (~15s)">
+              ⏳ Activating 2-of-2...
+            </span>
+          </template>
+          <button
+            v-else
+            type="button"
+            class="activate-smart-btn"
+            @click="openTradingSetupModal"
+            title="Activate Non-Custodial 2-of-2 Co-Signed Smart Trading Account"
+          >
+            ⚡ Activate Smart Trading
+          </button>
           <span class="bal-sep">•</span>
           <span class="bal-val text-emerald-400" title="Tradeable XPX">{{ totalAvailableXpx.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 }) }} XPX</span>
           <span class="bal-sep">•</span>
           <span v-if="isBnbPair" class="bal-val text-emerald-400" title="Tradeable BNB">{{ totalAvailableBnb.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) }} BNB</span>
           <span v-else class="bal-val text-emerald-400" title="Tradeable USDT">${{ totalAvailableUsdt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} USDT</span>
-          <button class="withdraw-pill ml-2" @click="openWithdrawModal" title="Withdraw funds from CLOB Vault to L1 wallet">
+          <button
+            v-if="hasSmartTradingAccount"
+            type="button"
+            class="topup-pill ml-2"
+            @click="openTopUpModal"
+            title="Transfer coins from Personal Wallet to your 2-of-2 Smart Trading Account"
+          >
+            + Top Up
+          </button>
+          <button class="withdraw-pill ml-2" @click="openWithdrawModal" :title="hasSmartTradingAccount ? 'Co-sign non-custodial withdrawal from Smart Trading Account to Personal Wallet' : 'Withdraw funds from CLOB Vault to L1 wallet'">
             Withdraw
           </button>
         </div>
@@ -1074,6 +1101,75 @@
       </div>
     </div>
 
+    <!-- Native Co-Signed Smart Trading Account Setup Modal (Solution 2 Model A) -->
+    <TradingAccountSetupModal
+      :visible="showTradingSetupModal"
+      :activeAccount="activeAccount"
+      :validatorCluster="validatorClusterInfo"
+      :clobApiBase="CLOB_API_BASE"
+      :networkType="getActiveNetworkId()"
+      :generationHash="getActiveGenerationHash()"
+      :sessionKey="sessionTradingPrivateKey"
+      @close="showTradingSetupModal = false"
+      @activated="onTradingAccountActivated"
+    />
+
+    <!-- Top-Up Modal: Direct L1 Transfer from Personal Main Wallet to 2-of-2 Smart Trading Account -->
+    <div v-if="showTopUpModal" class="modal-overlay" @click.self="showTopUpModal = false">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div class="modal-title">
+            <span class="modal-icon">📥</span>
+            <div>
+              <h3>Top Up Smart Trading Account</h3>
+              <p class="modal-subtitle">Direct L1 transfer from Personal Wallet to your 2-of-2 Co-Signed Account</p>
+            </div>
+          </div>
+          <button class="modal-close-btn" @click="showTopUpModal = false">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group mb-3">
+            <label class="modal-label">Select Asset (Personal Wallet Balance)</label>
+            <div class="flex gap-2">
+              <button type="button" class="pct-btn flex-1" :class="{ active: topUpAsset === 'XPX' }" @click="topUpAsset = 'XPX'">
+                XPX ({{ (personalWalletXpx || 0).toFixed(2) }})
+              </button>
+              <button type="button" class="pct-btn flex-1" :class="{ active: topUpAsset === 'USDT' }" @click="topUpAsset = 'USDT'">
+                USDT ({{ (personalWalletUsdt || 0).toFixed(2) }})
+              </button>
+              <button type="button" class="pct-btn flex-1" :class="{ active: topUpAsset === 'BNB' }" @click="topUpAsset = 'BNB'">
+                BNB ({{ (personalWalletBnb || 0).toFixed(4) }})
+              </button>
+            </div>
+          </div>
+          <div class="form-group mb-3">
+            <label class="modal-label">Amount to Transfer</label>
+            <div class="input-box">
+              <input type="number" v-model="topUpAmount" step="any" placeholder="0.00" class="form-input font-mono" />
+              <span class="unit">{{ topUpAsset }}</span>
+            </div>
+          </div>
+          <div class="summary-box mb-3 font-mono text-xs">
+            <div class="summary-row">
+              <span class="text-slate-400">From (Personal)</span>
+              <span class="text-slate-300">{{ activeAccount ? shortAddress(activeAccount.address) : '—' }}</span>
+            </div>
+            <div class="summary-row">
+              <span class="text-slate-400">To (2-of-2 Trading)</span>
+              <span class="text-emerald-400">{{ shortAddress(tradingAccountAddress) }}</span>
+            </div>
+          </div>
+          <p v-if="topUpError" class="text-xs text-rose-400 font-medium mb-2">{{ topUpError }}</p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-cancel" @click="showTopUpModal = false">Cancel</button>
+          <button class="btn-confirm-deposit" :disabled="isToppingUp" @click="executeTopUp">
+            {{ isToppingUp ? 'Broadcasting...' : 'Send to Trading Account' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Withdrawal Modal with Network Fee & Net Received Transparency -->
     <div v-if="showWithdrawModal" class="modal-overlay" @click.self="showWithdrawModal = false">
       <div class="modal-card">
@@ -1081,8 +1177,12 @@
           <div class="modal-title">
             <span class="modal-icon">💸</span>
             <div>
-              <h3>Withdraw to Sirius Wallet</h3>
-              <p class="modal-subtitle">Transfer funds from CLOB Vault to your on-chain Sirius account</p>
+              <h3>{{ hasSmartTradingAccount ? 'Co-Signed Withdrawal to Personal Wallet' : 'Withdraw to Sirius Wallet' }}</h3>
+              <p class="modal-subtitle">
+                {{ hasSmartTradingAccount
+                  ? 'Signed by you (Cosigner 1) + 2-of-3 Distributed Validators (Cosigner 2)'
+                  : 'Transfer funds from CLOB Vault to your on-chain Sirius account' }}
+              </p>
             </div>
           </div>
           <button class="modal-close-btn" @click="showWithdrawModal = false">✕</button>
@@ -1214,9 +1314,25 @@ import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from
 import { useRouter } from 'vue-router';
 import { walletState } from '@/state/walletState';
 import { networkState } from '@/state/networkState';
-import { Account, Password } from 'tsjs-xpx-chain-sdk';
+import {
+  Account,
+  Address,
+  AggregateTransaction,
+  CosignatureTransaction,
+  Deadline,
+  Mosaic,
+  MosaicId,
+  Password,
+  PlainMessage,
+  PublicAccount,
+  TransactionMapping,
+  TransactionType,
+  TransferTransaction,
+  UInt64,
+} from 'tsjs-xpx-chain-sdk';
 import { WalletUtils } from '@/util/walletUtils';
 import { WalletStateUtils } from '@/state/utils/walletStateUtils';
+import TradingAccountSetupModal from '../components/TradingAccountSetupModal.vue';
 import {
   createChart,
   ColorType,
@@ -1540,7 +1656,7 @@ const hasAnyClobBalance = computed(() => {
 
 const totalAvailableXpx = computed(() => {
   let base = userXpxBalance.value;
-  if (!isClobBalanceLoaded.value && displayAccountXpx.value > 0) {
+  if (!isClobBalanceLoaded.value && !hasSmartTradingAccount.value && displayAccountXpx.value > 0) {
     base = Math.max(0, displayAccountXpx.value - lockedXpxEscrow.value);
   }
   return Math.max(0, parseFloat((base - 0.2).toFixed(6))); // Reserve 0.2 XPX for L1 network gas
@@ -1548,7 +1664,7 @@ const totalAvailableXpx = computed(() => {
 
 const totalAvailableUsdt = computed(() => {
   let base = userUsdtBalance.value;
-  if (!isClobBalanceLoaded.value && displayAccountUsdt.value > 0) {
+  if (!isClobBalanceLoaded.value && !hasSmartTradingAccount.value && displayAccountUsdt.value > 0) {
     base = Math.max(0, displayAccountUsdt.value - lockedUsdtEscrow.value);
   }
   return parseFloat(base.toFixed(2));
@@ -1556,7 +1672,7 @@ const totalAvailableUsdt = computed(() => {
 
 const totalAvailableBnb = computed(() => {
   let base = userBnbBalance.value;
-  if (!isClobBalanceLoaded.value && displayAccountBnb.value > 0) {
+  if (!isClobBalanceLoaded.value && !hasSmartTradingAccount.value && displayAccountBnb.value > 0) {
     base = Math.max(0, displayAccountBnb.value - lockedBnbEscrow.value);
   }
   return parseFloat(base.toFixed(6));
@@ -1667,6 +1783,7 @@ watch(
   ([newKey, newAddr]) => {
     if (newKey || newAddr) {
       isClobBalanceLoaded.value = false;
+      tradingAccountInfo.value = null;
       const rawAddr = (newAddr || '').replace(/[- ]/g, '').toUpperCase();
       // Immediately reset and isolate balances to the new account, preventing cross-wallet leaks
       userXpxBalance.value = parseFloat(localStorage.getItem(`clob_bal_${rawAddr}_xpx`) || '0');
@@ -1683,6 +1800,7 @@ watch(
       onChainUsdt.value = 0;
       onChainBnb.value = 0;
       fetchOnChainBalances();
+      fetchTradingAccountStatus();
       syncFromNode();
     }
   },
@@ -2176,10 +2294,261 @@ function unlockTradingSession() {
     } else if (pendingAction.value === 'withdraw') {
       pendingAction.value = null;
       executeWithdraw();
+    } else if (pendingAction.value === 'topup') {
+      pendingAction.value = null;
+      executeTopUp();
     }
   } catch (err: any) {
     passwordError.value = 'Incorrect wallet password. Please verify your password.';
     showToast('Authorization Failed', 'Incorrect wallet password. Please try again.', 'error', 4500);
+  }
+}
+
+// === Solution 2 (Model A): Native Co-Signed Smart Trading Account State & Operations ===
+const tradingAccountInfo = ref<any>(null);
+const validatorClusterInfo = ref<any>(null);
+const showTradingSetupModal = ref<boolean>(false);
+const showTopUpModal = ref<boolean>(false);
+const topUpAsset = ref<'XPX' | 'USDT' | 'BNB'>('XPX');
+const topUpAmount = ref<string>('');
+const isToppingUp = ref<boolean>(false);
+const topUpError = ref<string>('');
+const cosigningSettlementIds = new Set<string>();
+
+const hasSmartTradingAccount = computed(() => {
+  return Boolean(tradingAccountInfo.value?.hasTradingAccount && tradingAccountInfo.value?.status === 'active');
+});
+
+const isTradingAccountPending = computed(() => {
+  return Boolean(tradingAccountInfo.value?.hasTradingAccount && tradingAccountInfo.value?.status === 'pending');
+});
+
+const tradingAccountAddress = computed(() => {
+  return tradingAccountInfo.value?.tradingAccount?.tradingAddress || '';
+});
+
+const tradingAccountPublicKey = computed(() => {
+  return tradingAccountInfo.value?.tradingAccount?.tradingPublicKey || '';
+});
+
+const personalWalletXpx = computed(() => onChainXpx.value || 0);
+const personalWalletUsdt = computed(() => onChainUsdt.value || 0);
+const personalWalletBnb = computed(() => onChainBnb.value || 0);
+
+function getActiveGenerationHash(): string {
+  if (validatorClusterInfo.value?.generationHash) return validatorClusterInfo.value.generationHash;
+  return getActiveNetworkId() === 184
+    ? '10540AD3A1BF46B1A05D8B1CF0252BC9FB2E0B53CFD748262B0CE341CEAFEB6B'
+    : '56D112C98F7A7E34D1AEDC4BD01BC06CA2276DD546A93E36690B785E82439CA9';
+}
+
+function getMosaicHexForAsset(asset: 'XPX' | 'USDT' | 'BNB'): string {
+  const isMainnet = getActiveNetworkId() === 184;
+  if (asset === 'XPX') return isMainnet ? '402B2F579FAEBC59' : '13BFC518E40549D7';
+  if (asset === 'USDT') return isMainnet ? '7525381A171D1E44' : '4430AEFEF7E15D0C';
+  return isMainnet ? '1E5C5FADEC7B34DD' : '3CC1D3CE7447B6F9';
+}
+
+function getActiveSiriusNodeEndpoint(): string {
+  let nodeEndpoint = networkState.selectedAPIEndpoint || (getActiveNetworkId() === 184 ? 'https://betelgeuse.xpxsirius.io' : 'https://api-2.testnet2.xpxsirius.io');
+  if (getActiveNetworkId() === 184 && (!networkState.selectedAPIEndpoint || networkState.selectedAPIEndpoint.includes('testnet'))) {
+    nodeEndpoint = 'https://betelgeuse.xpxsirius.io';
+  }
+  if (!nodeEndpoint.startsWith('http://') && !nodeEndpoint.startsWith('https://')) {
+    const proto = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'https' : 'http';
+    nodeEndpoint = `${proto}://${nodeEndpoint}`;
+  }
+  nodeEndpoint = nodeEndpoint.replace(/\/+$/, '');
+  if (nodeEndpoint.startsWith('https://') && nodeEndpoint.endsWith(':3000')) {
+    nodeEndpoint = nodeEndpoint.replace(':3000', '');
+  }
+  return nodeEndpoint;
+}
+
+async function fetchTradingAccountStatus() {
+  if (!activeAccount.value?.publicKey && !activeAccount.value?.address) return;
+  try {
+    const qParam = activeAccount.value.publicKey
+      ? `ownerPublicKey=${activeAccount.value.publicKey}`
+      : `ownerAddress=${activeAccount.value.address}`;
+    const res = await fetch(`${CLOB_API_BASE}/api/clob/trading-account/status?${qParam}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.ok) {
+        tradingAccountInfo.value = data;
+        if (data.validatorCluster) {
+          validatorClusterInfo.value = data.validatorCluster;
+        }
+      }
+    }
+  } catch (_) {}
+}
+
+function openTradingSetupModal() {
+  fetchTradingAccountStatus().catch(() => {});
+  showTradingSetupModal.value = true;
+}
+
+function onTradingAccountActivated(res: any) {
+  if (res?.ownerPrivateKey && !sessionTradingPrivateKey.value) {
+    setTradingSessionKey(res.ownerPrivateKey);
+  }
+  showTradingSetupModal.value = false;
+  showToast(
+    'Smart Trading Account Broadcast!',
+    `2-of-2 Co-Signed Trading Account conversion submitted (${String(res.txHash || '').slice(0, 14)}...). Confirming on Sirius L1 (~15s).`,
+    'success',
+    7000,
+    res.txHash
+  );
+  fetchTradingAccountStatus();
+  let polls = 0;
+  const t = setInterval(async () => {
+    polls++;
+    await fetchTradingAccountStatus();
+    if (hasSmartTradingAccount.value || polls >= 12) {
+      clearInterval(t);
+      if (hasSmartTradingAccount.value) {
+        showToast('Smart Trading Account Active!', 'Your non-custodial 2-of-2 Trading Account is now live on Sirius L1!', 'success', 5000);
+        syncFromNode();
+      }
+    }
+  }, 2500);
+}
+
+function openTopUpModal() {
+  topUpError.value = '';
+  topUpAmount.value = '';
+  showTopUpModal.value = true;
+}
+
+async function executeTopUp() {
+  if (isToppingUp.value) return;
+  if (!hasSmartTradingAccount.value || !tradingAccountAddress.value) {
+    topUpError.value = 'Smart Trading Account is not active yet.';
+    return;
+  }
+  const amt = parseFloat(topUpAmount.value);
+  if (isNaN(amt) || amt <= 0) {
+    topUpError.value = 'Enter a valid amount greater than 0.';
+    return;
+  }
+  const signer = getSignerAccount();
+  if (!signer) {
+    pendingAction.value = 'topup';
+    showPasswordModal.value = true;
+    passwordError.value = '';
+    return;
+  }
+
+  isToppingUp.value = true;
+  topUpError.value = '';
+  try {
+    const netId = getActiveNetworkId();
+    const genHash = getActiveGenerationHash();
+    const mosaicHex = getMosaicHexForAsset(topUpAsset.value);
+    const atomicAmt = BigInt(Math.round(amt * 1_000_000));
+    const mosaic = new Mosaic(
+      new MosaicId(mosaicHex),
+      UInt64.fromHex(atomicAmt.toString(16).padStart(16, '0'))
+    );
+    const tx = TransferTransaction.create(
+      Deadline.create(),
+      Address.createFromRawAddress(tradingAccountAddress.value),
+      [mosaic],
+      PlainMessage.create('SiriusCLOB: Trading Account Top-Up'),
+      netId,
+      UInt64.fromUint(100000)
+    );
+    const signedTx = signer.preV2Sign(tx, genHash);
+    const endpoint = getActiveSiriusNodeEndpoint();
+    const res = await fetch(`${endpoint}/transactions`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payload: signedTx.payload }),
+    });
+    if (!res.ok) {
+      const errTxt = await res.text();
+      throw new Error(`Sirius node rejected transfer: ${errTxt}`);
+    }
+    showToast(
+      'Top-Up Broadcast!',
+      `Sent ${amt} ${topUpAsset.value} directly to your 2-of-2 Smart Trading Account. Confirming in ~15s.`,
+      'success',
+      6000,
+      signedTx.hash
+    );
+    showTopUpModal.value = false;
+    topUpAmount.value = '';
+    let polls = 0;
+    const poller = setInterval(async () => {
+      polls++;
+      await fetchTradingAccountStatus();
+      await syncFromNode();
+      if (polls >= 10) clearInterval(poller);
+    }, 3000);
+  } catch (err: any) {
+    topUpError.value = err?.message || 'Top-up transfer failed';
+    showToast('Top-Up Failed', topUpError.value, 'error');
+  } finally {
+    isToppingUp.value = false;
+  }
+}
+
+async function cosignVerifiedSettlement(settlement: any) {
+  if (!settlement || !settlement.settlementId || !settlement.aggregatePayload) return;
+  if (cosigningSettlementIds.has(settlement.settlementId)) return;
+  const signer = getSignerAccount();
+  if (!signer) return;
+
+  cosigningSettlementIds.add(settlement.settlementId);
+  try {
+    // Independently inspect aggregate payload locally before cosigning:
+    // Ensure ONLY TransferTransactions exist, and outflows strictly match signed order fills
+    const decoded: any = TransactionMapping.createFromPayload(settlement.aggregatePayload);
+    if (decoded.type !== TransactionType.AGGREGATE_COMPLETE_V1 && decoded.type !== 16705) {
+      return;
+    }
+    const innerTxns = decoded.innerTransactions || [];
+    for (const inner of innerTxns) {
+      if (inner.type !== TransactionType.TRANSFER && inner.type !== 16724) {
+        console.warn('[Settlement Safety] Refused non-transfer inner tx in settlement aggregate');
+        return;
+      }
+    }
+
+    const genHash = getActiveGenerationHash();
+    const cosig = CosignatureTransaction.signTransactionPayload(
+      signer,
+      settlement.aggregatePayload,
+      genHash
+    );
+    const res = await fetch(`${CLOB_API_BASE}/api/clob/trading-account/cosign-settlement`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        settlementId: settlement.settlementId,
+        cosignature: {
+          parentHash: cosig.parentHash,
+          signer: cosig.signer,
+          signature: cosig.signature,
+        },
+      }),
+    });
+    const data = await res.json();
+    if (data.ok && data.txHash) {
+      showToast(
+        'Atomic L1 Settlement Broadcast!',
+        `2-of-2 Peer-to-Peer swap signed by you & ${(data.approvedByNodes || []).length} validator nodes.`,
+        'trade',
+        5000,
+        data.txHash
+      );
+    }
+  } catch (err) {
+    console.warn('[Settlement Cosign] Notice:', err);
+  } finally {
+    cosigningSettlementIds.delete(settlement.settlementId);
   }
 }
 
@@ -2194,6 +2563,7 @@ const isWithdrawing = ref<boolean>(false);
 const withdrawError = ref<string>('');
 
 const withdrawalNetworkFee = computed(() => {
+  if (hasSmartTradingAccount.value) return 0; // Native L1 gas only, 0 exchange fee!
   if (withdrawAsset.value === 'BNB') return 0.001;
   return 1.0;
 });
@@ -2259,16 +2629,78 @@ async function executeWithdraw() {
 
   isWithdrawing.value = true;
   withdrawError.value = '';
-  const now = Date.now();
-  const nonce = generateSecureNonce(now);
-  const expiry = now + PASSWORD_EXPIRY_MS;
   const netId = getActiveNetworkId();
   const cleanAddr = (activeAccount.value?.address || '').replace(/[- ]/g, '').toUpperCase();
-  const formattedAmt = withdrawAsset.value === 'BNB' ? amt.toFixed(6) : amt.toFixed(6);
-  const withdrawMsg = `${netId}:SiriusCLOB-v1:WITHDRAW:${withdrawAsset.value}:${formattedAmt}:${cleanAddr}:${nonce}:${expiry}`;
-  const signature = signer.signData(withdrawMsg);
 
   try {
+    // Solution 2 (Model A): Native Co-Signed Non-Custodial Withdrawal from 2-of-2 Trading Account
+    if (hasSmartTradingAccount.value && tradingAccountPublicKey.value) {
+      const genHash = getActiveGenerationHash();
+      const mosaicHex = getMosaicHexForAsset(withdrawAsset.value);
+      const atomicAmt = BigInt(Math.round(amt * 1_000_000));
+      const mosaic = new Mosaic(
+        new MosaicId(mosaicHex),
+        UInt64.fromHex(atomicAmt.toString(16).padStart(16, '0'))
+      );
+      const tradingPubAcc = PublicAccount.createFromPublicKey(tradingAccountPublicKey.value, netId);
+      const innerTx = TransferTransaction.create(
+        Deadline.create(),
+        Address.createFromRawAddress(cleanAddr),
+        [mosaic],
+        PlainMessage.create('SiriusCLOB: Co-Signed Withdrawal'),
+        netId
+      ).toAggregateV1(tradingPubAcc);
+
+      const aggTx = AggregateTransaction.createCompleteV1(
+        Deadline.create(),
+        [innerTx],
+        netId,
+        [],
+        UInt64.fromUint(200000)
+      );
+
+      // User signs as outer initiator (satisfies Cosigner 1 of the 2-of-2 Trading Account)
+      const signedByInitiator = signer.preV2Sign(aggTx, genHash);
+
+      const res = await fetch(`${CLOB_API_BASE}/api/clob/trading-account/cosign-withdrawal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          signedByInitiatorPayload: signedByInitiator.payload,
+          callerPublicKey: signer.publicKey,
+          tradingAccountPublicKey: tradingAccountPublicKey.value,
+          recipientAddress: cleanAddr,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        const nodesLabel = Array.isArray(data.approvedByNodes) ? data.approvedByNodes.join(', ') : '2-of-3 Validators';
+        showToast(
+          'Co-Signed Withdrawal Broadcast!',
+          `Withdrew ${amt} ${withdrawAsset.value} directly from your 2-of-2 Trading Account to Personal Wallet.\nCo-signed by: ${nodesLabel}`,
+          'success',
+          6500,
+          data.txHash
+        );
+        showWithdrawModal.value = false;
+        withdrawAmount.value = '';
+        fetchTradingAccountStatus().catch(() => {});
+        syncFromNode().catch(() => {});
+      } else {
+        withdrawError.value = data.error || 'Co-signed withdrawal rejected';
+        showToast('Withdrawal Rejected', withdrawError.value, 'error');
+      }
+      return;
+    }
+
+    // Legacy Vault Withdrawal Path
+    const now = Date.now();
+    const nonce = generateSecureNonce(now);
+    const expiry = now + PASSWORD_EXPIRY_MS;
+    const formattedAmt = withdrawAsset.value === 'BNB' ? amt.toFixed(6) : amt.toFixed(6);
+    const withdrawMsg = `${netId}:SiriusCLOB-v1:WITHDRAW:${withdrawAsset.value}:${formattedAmt}:${cleanAddr}:${nonce}:${expiry}`;
+    const signature = signer.signData(withdrawMsg);
+
     const res = await fetch(`${CLOB_API_BASE}/api/clob/withdraw`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2438,6 +2870,11 @@ async function submitOrder() {
     const data = await res.json();
     if (data.ok) {
       applyBalances(data.balances);
+
+      // Immediately co-sign atomic L1 trade settlement if user's Smart Trading Account filled
+      if (data.pendingSettlement) {
+        cosignVerifiedSettlement(data.pendingSettlement).catch(() => {});
+      }
 
       const orderId = data.orderId || ++nextOrderId;
       if (data.fillsCount > 0) {
@@ -3129,8 +3566,24 @@ async function syncFromNode() {
       }
     } catch (_) {}
 
-    // 6. Sync Batch Status
+    // 6. Sync Batch Status & Smart Trading Account Status + Auto-cosign pending settlements
     await syncBatchStatus();
+    await fetchTradingAccountStatus();
+    if (hasSmartTradingAccount.value && sessionTradingPrivateKey.value && activeAccount.value?.publicKey) {
+      try {
+        const resSettle = await fetch(`${CLOB_API_BASE}/api/clob/trading-account/pending-settlements?ownerPublicKey=${activeAccount.value.publicKey}`);
+        if (resSettle.ok) {
+          const sData = await resSettle.json();
+          if (sData.ok && Array.isArray(sData.settlements)) {
+            for (const s of sData.settlements) {
+              if (s.status === 'pending_cosign') {
+                cosignVerifiedSettlement(s).catch(() => {});
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    }
   } catch (_) {
     isConnected.value = false;
   }
@@ -5136,5 +5589,63 @@ onUnmounted(() => {
     transform: translateX(0);
     opacity: 1;
   }
+}
+
+.smart-acc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: #34d399;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.smart-acc-pending {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #fbbf24;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.activate-smart-btn {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.25), rgba(5, 150, 105, 0.25));
+  border: 1px solid rgba(16, 185, 129, 0.45);
+  color: #6ee7b7;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.activate-smart-btn:hover {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.4), rgba(5, 150, 105, 0.4));
+  color: #ffffff;
+}
+
+.topup-pill {
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #7dd3fc;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.topup-pill:hover {
+  background: rgba(56, 189, 248, 0.28);
+  color: #ffffff;
 }
 </style>

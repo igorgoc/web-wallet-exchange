@@ -10,6 +10,8 @@ export class WalletAccount extends Account{
     encrypted: string;
     iv: string;
     nis1Account: nis1Account | null = null;
+    isTradingAccount?: boolean = false;
+    linkedMainAddress?: string = '';
 
     constructor(name: string, publicKey: string, address: string, algo: string, encrypted: string, iv: string){
         super(name, publicKey, address);
