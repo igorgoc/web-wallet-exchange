@@ -1593,8 +1593,13 @@ function checkMobile() {
   }
 }
 
-// Active Wallet Account from session
-const activeAccount = computed(() => {
+// Selected Wallet Account vs Canonical Main Owner Account
+// If the user enters the CLOB while a Trading Account (e.g. Trading (primary)) is selected,
+// automatically resolve its linked Main Account in the same wallet so both behave identically.
+const discoveredOwnerAddress = ref<string>('');
+const discoveredOwnerPublicKey = ref<string>('');
+
+const selectedWalletAccount = computed(() => {
   const wallet = walletState.currentLoggedInWallet;
   if (!wallet) return null;
   if (typeof wallet.selectDefaultAccount === 'function') {
@@ -1603,6 +1608,44 @@ const activeAccount = computed(() => {
   }
   return wallet.accounts?.[0] || null;
 });
+
+function normalizeAddrStr(addr?: string | null): string {
+  return String(addr || '').replace(/[- ]/g, '').toUpperCase();
+}
+
+const activeAccount = computed(() => {
+  const sel: any = selectedWalletAccount.value;
+  if (!sel) return null;
+  const wallet = walletState.currentLoggedInWallet;
+  const accounts: any[] = wallet?.accounts || [];
+
+  const linkedMain = normalizeAddrStr(sel.linkedMainAddress);
+  if (linkedMain) {
+    const found = accounts.find((a) => normalizeAddrStr(a?.address) === linkedMain);
+    if (found) return found;
+  }
+
+  const discAddr = normalizeAddrStr(discoveredOwnerAddress.value);
+  const discPub = String(discoveredOwnerPublicKey.value || '').toUpperCase();
+  if (discAddr || discPub) {
+    const found = accounts.find(
+      (a) =>
+        (discAddr && normalizeAddrStr(a?.address) === discAddr) ||
+        (discPub && String(a?.publicKey || '').toUpperCase() === discPub)
+    );
+    if (found) return found;
+  }
+
+  return sel;
+});
+
+watch(
+  () => [selectedWalletAccount.value?.publicKey, selectedWalletAccount.value?.address],
+  () => {
+    discoveredOwnerAddress.value = '';
+    discoveredOwnerPublicKey.value = '';
+  }
+);
 
 // Purge obsolete global localStorage cache from previous revisions
 try {
@@ -1770,9 +1813,13 @@ watch(
   () => [activeAccount.value?.publicKey, activeAccount.value?.address],
   ([newKey, newAddr]) => {
     if (newKey || newAddr) {
-      isClobBalanceLoaded.value = false;
-      tradingAccountInfo.value = null;
       const rawAddr = (newAddr || '').replace(/[- ]/g, '').toUpperCase();
+      const existingOwnerAddr = normalizeAddrStr(tradingAccountInfo.value?.tradingAccount?.ownerAddress);
+      const keepExistingTradingInfo = Boolean(existingOwnerAddr && existingOwnerAddr === rawAddr);
+      isClobBalanceLoaded.value = false;
+      if (!keepExistingTradingInfo) {
+        tradingAccountInfo.value = null;
+      }
       // Immediately reset and isolate balances to the new account, preventing cross-wallet leaks
       userXpxBalance.value = parseFloat(localStorage.getItem(`clob_bal_${rawAddr}_xpx`) || '0');
       userUsdtBalance.value = parseFloat(localStorage.getItem(`clob_bal_${rawAddr}_usdt`) || '0.00');
@@ -2362,11 +2409,12 @@ function getActiveSiriusNodeEndpoint(): string {
 }
 
 async function fetchTradingAccountStatus() {
-  if (!activeAccount.value?.publicKey && !activeAccount.value?.address) return;
+  const queryAcc = activeAccount.value || selectedWalletAccount.value;
+  if (!queryAcc?.publicKey && !queryAcc?.address) return;
   try {
-    const qParam = activeAccount.value.publicKey
-      ? `ownerPublicKey=${activeAccount.value.publicKey}`
-      : `ownerAddress=${activeAccount.value.address}`;
+    const qParam = queryAcc.publicKey
+      ? `ownerPublicKey=${queryAcc.publicKey}`
+      : `ownerAddress=${queryAcc.address}`;
     const res = await fetch(`${CLOB_API_BASE}/api/clob/trading-account/status?${qParam}`);
     if (res.ok) {
       const data = await res.json();
@@ -2374,6 +2422,18 @@ async function fetchTradingAccountStatus() {
         tradingAccountInfo.value = data;
         if (data.validatorCluster) {
           validatorClusterInfo.value = data.validatorCluster;
+        }
+        const tAcc = data.tradingAccount;
+        if (tAcc?.ownerAddress || tAcc?.ownerPublicKey) {
+          const sel: any = selectedWalletAccount.value;
+          if (sel && normalizeAddrStr(sel.address) === normalizeAddrStr(tAcc.tradingAddress)) {
+            discoveredOwnerAddress.value = tAcc.ownerAddress || '';
+            discoveredOwnerPublicKey.value = tAcc.ownerPublicKey || '';
+            if (!sel.linkedMainAddress && tAcc.ownerAddress) {
+              sel.linkedMainAddress = tAcc.ownerAddress;
+              sel.isTradingAccount = true;
+            }
+          }
         }
       }
     }
@@ -2586,6 +2646,11 @@ async function executeTopUp() {
     topUpError.value = 'Smart Trading Account is not active yet.';
     return;
   }
+  if (normalizeAddrStr(activeAccount.value?.address) === normalizeAddrStr(tradingAccountAddress.value)) {
+    const ownerAddr = tradingAccountInfo.value?.tradingAccount?.ownerAddress || 'your main account';
+    topUpError.value = `To top up this 2-of-2 Trading Account, make sure linked main account (${ownerAddr}) is in your wallet.`;
+    return;
+  }
   const entries = parseAssetAmounts(topUpAmounts.value);
   if (entries.length === 0) {
     topUpError.value = 'Enter an amount for at least one coin.';
@@ -2771,6 +2836,11 @@ function setWithdrawAssetPct(asset: ClobAsset, pct: number) {
 
 async function executeWithdraw() {
   if (isWithdrawing.value) return;
+  if (hasSmartTradingAccount.value && normalizeAddrStr(activeAccount.value?.address) === normalizeAddrStr(tradingAccountAddress.value)) {
+    const ownerAddr = tradingAccountInfo.value?.tradingAccount?.ownerAddress || 'your main account';
+    withdrawError.value = `To co-sign withdrawals for this 2-of-2 Trading Account, import/select linked main account (${ownerAddr}) in your wallet.`;
+    return;
+  }
   const entries = parseAssetAmounts(withdrawAmounts.value);
   if (entries.length === 0) {
     withdrawError.value = 'Enter a withdrawal amount for at least one coin.';
