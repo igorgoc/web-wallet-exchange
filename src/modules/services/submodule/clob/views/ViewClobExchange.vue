@@ -112,7 +112,7 @@
           </button>
         </div>
 
-        <!-- Mobile Direct Faucet Button (Testnet only) -->
+        <!-- Direct Faucet Button (Testnet only) -->
         <button 
           v-if="getActiveNetworkId() !== 184 && isFaucetSupported" 
           type="button" 
@@ -124,42 +124,6 @@
           <span class="faucet-drop" :class="{ 'spin-pulse': isClaimingFaucet }">💧</span>
           <span class="faucet-txt">{{ isClaimingFaucet ? 'Claiming...' : 'Faucet' }}</span>
         </button>
-
-        <!-- Dev & Tools Menu Popover (...) -->
-        <div class="dev-menu-wrapper" style="position: relative; flex-shrink: 0; z-index: 1001;">
-          <button 
-            type="button" 
-            class="icon-btn-dots" 
-            @click.stop="showDevMenu = !showDevMenu" 
-            title="Developer Tools & Diagnostics"
-          >
-            •••
-          </button>
-
-          <div v-if="showDevMenu" class="dev-dropdown-popover" @click.stop>
-            <div v-if="getActiveNetworkId() !== 184 && isFaucetSupported" class="dev-dropdown-item" @click="claimFaucet(); showDevMenu = false">
-              <span class="dev-item-icon">💧</span>
-              <div>
-                <div class="dev-item-title">Claim On-Chain Faucet (Testnet)</div>
-                <div class="dev-item-sub">+10 XPX, +50 USDT &amp; +0.05 BNB</div>
-              </div>
-            </div>
-            <div class="dev-dropdown-item" @click="toggleMarketMaker(); showDevMenu = false">
-              <span class="dev-item-icon">🤖</span>
-              <div>
-                <div class="dev-item-title">{{ isMmRunning ? 'Pause Market Maker' : 'Start Market Maker' }}</div>
-                <div class="dev-item-sub">{{ isMmRunning ? 'MM Running' : 'MM Idle' }}</div>
-              </div>
-            </div>
-            <div class="dev-dropdown-item" @click="flushBatchSettlement(); showDevMenu = false">
-              <span class="dev-item-icon">⚡</span>
-              <div>
-                <div class="dev-item-title">Flush On-Chain Batch</div>
-                <div class="dev-item-sub">{{ pendingBatchCount }} Pending Payouts</div>
-              </div>
-            </div>
-          </div>
-        </div>
 
         <!-- Small Dot Connection Indicator -->
         <div class="conn-dot-container flex-shrink-0" :title="isConnected ? 'Connected to SiriusCLOB' : 'Offline'">
@@ -1577,7 +1541,6 @@ const formatQuoteAvail = computed(() => {
 });
 
 const obTab = ref<'book' | 'trades'>('book');
-const showDevMenu = ref<boolean>(false);
 const activeTab = ref<'orders' | 'myTrades'>('orders');
 const orderSide = ref<'buy' | 'sell'>('buy');
 const orderType = ref<string>('Limit');
@@ -1640,13 +1603,6 @@ function stepAmount(direction: number) {
   const next = Math.max(0, current + direction);
   orderAmount.value = next > 0 ? next : '';
 }
-
-const handleDocumentClick = (e: MouseEvent) => {
-  const target = e.target as HTMLElement;
-  if (!target.closest('.dev-menu-wrapper')) {
-    showDevMenu.value = false;
-  }
-};
 
 function formatCompactNumber(val: number | string): string {
   const n = Number(val);
@@ -2404,12 +2360,6 @@ function unlockTradingSession() {
     } else if (pendingAction.value === 'cancelAll') {
       pendingAction.value = null;
       cancelAllOrders();
-    } else if (pendingAction.value === 'toggleMm') {
-      pendingAction.value = null;
-      toggleMarketMaker();
-    } else if (pendingAction.value === 'flushBatch') {
-      pendingAction.value = null;
-      flushBatchSettlement();
     } else if (pendingAction.value === 'withdraw') {
       pendingAction.value = null;
       executeWithdraw();
@@ -2994,7 +2944,6 @@ async function cosignVerifiedSettlement(settlement: any): Promise<{ ok: boolean;
 }
 
 const isSubmitting = ref(false);
-const isFlushingBatch = ref(false);
 
 // Withdrawal State & Operations (Unified Multi-Mosaic)
 const showWithdrawModal = ref<boolean>(false);
@@ -3371,7 +3320,6 @@ async function submitOrder() {
 
       isSubmitting.value = false;
       syncFromNode().catch(() => {});
-      syncBatchStatus().catch(() => {});
     } else {
       handleApiError(res, data, 'Order Error');
     }
@@ -3773,135 +3721,9 @@ function renderChart() {
   loadCandlesToChart();
 }
 
-// Market Maker & Node Sync State
-const isMmRunning = ref<boolean>(false);
-const mmRound = ref<number>(0);
-const pendingBatchCount = ref<number>(0);
+// Node Sync State
 const tradeTimestampMap = new Map<string, string>();
 let pollTimer: any = null;
-
-async function toggleMarketMaker() {
-  if (!activeAccount.value) {
-    showToast('No Active Account', 'Signing refused: Please select or connect an active wallet account.', 'error');
-    return;
-  }
-
-  const signer = getSignerAccount();
-  if (!signer) {
-    pendingAction.value = 'toggleMm';
-    showPasswordModal.value = true;
-    passwordError.value = '';
-    return;
-  }
-
-  try {
-    const action = isMmRunning.value ? 'MM_STOP' : 'MM_START';
-    const endpoint = isMmRunning.value ? '/api/clob/mm/stop' : '/api/clob/mm/start';
-    const now = Date.now();
-    const nonce = generateSecureNonce(now);
-    const expiry = now + PASSWORD_EXPIRY_MS;
-    const netId = getActiveNetworkId();
-    const msg = `${netId}:SiriusCLOB-v1:ADMIN:ACTION:${action}:${nonce}:${expiry}`;
-    const signature = signer.signData(msg);
-
-    const res = await fetch(`${CLOB_API_BASE}${endpoint}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        publicKey: signer.publicKey,
-        action,
-        nonce,
-        expiry,
-        signature,
-      }),
-    });
-    const data = await res.json();
-    if (res.ok && data.ok) {
-      isMmRunning.value = !isMmRunning.value;
-      if (isMmRunning.value) {
-        showToast('MM Bot Launched', 'Active 5-level quoting and taker trading is now live across 3 nodes.', 'trade');
-      } else {
-        showToast('MM Bot Stopped', 'Market maker bot has been halted.', 'info');
-      }
-      syncFromNode();
-    } else {
-      showToast('MM Control Denied', data.error || 'Failed to toggle Market Maker bot.', 'warning');
-    }
-  } catch (err: any) {
-    showToast('MM Control Failed', err.message || `Could not communicate with CLOB service at ${CLOB_API_BASE}.`, 'error');
-  }
-}
-
-async function syncBatchStatus() {
-  try {
-    const res = await fetch(`${CLOB_API_BASE}/api/clob/batch/status`);
-    if (res.ok) {
-      const data = await res.json();
-      pendingBatchCount.value = data.pendingCount || 0;
-    }
-  } catch (_) {}
-}
-
-async function flushBatchSettlement() {
-  if (isFlushingBatch.value) return;
-  if (!activeAccount.value) {
-    showToast('No Active Account', 'Signing refused: Please select or connect an active wallet account.', 'error');
-    return;
-  }
-
-  const signer = getSignerAccount();
-  if (!signer) {
-    pendingAction.value = 'flushBatch';
-    showPasswordModal.value = true;
-    passwordError.value = '';
-    return;
-  }
-
-  isFlushingBatch.value = true;
-  try {
-    const now = Date.now();
-    const nonce = generateSecureNonce(now);
-    const expiry = now + PASSWORD_EXPIRY_MS;
-    const action = 'BATCH_FLUSH';
-    const netId = getActiveNetworkId();
-    const msg = `${netId}:SiriusCLOB-v1:ADMIN:ACTION:${action}:${nonce}:${expiry}`;
-    const signature = signer.signData(msg);
-
-    const res = await fetch(`${CLOB_API_BASE}/api/clob/batch/flush`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        publicKey: signer.publicKey,
-        action,
-        nonce,
-        expiry,
-        signature,
-      }),
-    });
-    const data = await res.json();
-    if (res.ok && data.ok) {
-      if (!data.empty) {
-        showToast(
-          'Batch Settled On-Chain!',
-          `Aggregate Complete Tx: ${data.txHash ? data.txHash.slice(0, 16) + '...' : 'Committed'} (${data.nettedCount} payouts co-signed 3/3)`,
-          'trade',
-          5000,
-          data.txHash
-        );
-      } else {
-        showToast('Batch Settlement', 'No pending payouts to settle in this round.', 'info');
-      }
-      await syncBatchStatus();
-      await syncFromNode();
-    } else {
-      showToast('Batch Settlement Denied', data.error || 'Failed to flush settlement batch.', 'warning');
-    }
-  } catch (err: any) {
-    showToast('Batch Settlement Error', err.message, 'error');
-  } finally {
-    isFlushingBatch.value = false;
-  }
-}
 
 async function syncFromNode() {
   try {
@@ -4011,12 +3833,10 @@ async function syncFromNode() {
       }
     } catch (_) {}
 
-    // 4. Sync MM Bot Status
+    // 4. Sync 24h Market Maker Volume
     const resMm = await fetch(`${CLOB_API_BASE}/api/clob/mm/status`);
     if (resMm.ok) {
       const mmData = await resMm.json();
-      isMmRunning.value = !!mmData.running;
-      mmRound.value = mmData.round || 0;
       if (mmData.volumeXPX > 0) {
         volume24h.value = Math.round(mmData.volumeXPX / 1_000_000);
       }
@@ -4033,8 +3853,7 @@ async function syncFromNode() {
       }
     } catch (_) {}
 
-    // 6. Sync Batch Status & Smart Trading Account Status + Auto-cosign pending settlements
-    await syncBatchStatus();
+    // 6. Sync Smart Trading Account Status + Auto-cosign pending settlements
     await fetchTradingAccountStatus();
     if (hasSmartTradingAccount.value && sessionTradingPrivateKey.value && activeAccount.value?.publicKey) {
       try {
@@ -4087,7 +3906,6 @@ onMounted(() => {
   checkMobile();
   if (typeof window !== 'undefined') {
     window.addEventListener('resize', checkMobile);
-    document.addEventListener('click', handleDocumentClick);
   }
   nextTick(() => {
     initTradingViewChart();
@@ -4101,7 +3919,6 @@ onMounted(() => {
 onUnmounted(() => {
   if (typeof window !== 'undefined') {
     window.removeEventListener('resize', checkMobile);
-    document.removeEventListener('click', handleDocumentClick);
   }
   if (resizeObserver) {
     resizeObserver.disconnect();
@@ -4486,61 +4303,6 @@ onUnmounted(() => {
 }
 .wallet-balance-area .bal-sep {
   color: #24352f;
-}
-
-/* Dev & Tools Popover Menu */
-.icon-btn-dots {
-  background: #0d1512;
-  color: #7b8e87;
-  border: 1px solid #16241f;
-  width: 32px;
-  height: 32px;
-  border-radius: 9999px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.icon-btn-dots:hover {
-  background: #17382a;
-  border-color: rgba(44, 213, 138, 0.3);
-  color: #2cd58a;
-}
-
-.dev-dropdown-popover {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  background: #0d1512;
-  border: 1px solid #16241f;
-  border-radius: 10px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(44, 213, 138, 0.15);
-  width: 250px;
-  z-index: 99999;
-  padding: 6px 0;
-}
-.dev-dropdown-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 14px;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-.dev-dropdown-item:hover {
-  background: #1e293b;
-}
-.dev-item-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: #f8fafc;
-}
-.dev-item-sub {
-  font-size: 11px;
-  color: #94a3b8;
 }
 
 /* Small Connection Dot */
@@ -5070,11 +4832,6 @@ onUnmounted(() => {
     padding: 4px 8px;
     font-size: 10.5px;
   }
-  .icon-btn-dots {
-    width: 28px;
-    height: 28px;
-    font-size: 13px;
-  }
   .mobile-chart-panel .panel-header {
     flex-wrap: wrap;
     height: auto;
@@ -5108,13 +4865,6 @@ onUnmounted(() => {
     max-width: 100%;
     box-sizing: border-box;
     min-width: 0;
-  }
-  .dev-dropdown-popover {
-    top: 38px;
-    right: 0;
-    width: 260px;
-    max-width: calc(100vw - 20px);
-    z-index: 99999;
   }
   input.form-input,
   input.mobile-clean-input,
