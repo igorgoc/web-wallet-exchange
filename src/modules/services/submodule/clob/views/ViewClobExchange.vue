@@ -3791,10 +3791,28 @@ async function syncFromNode() {
             const amount = t.base_amount / 1_000_000;
             const side = (t.taker_side === 'Buy' || t.taker_side === 0) ? 'buy' : 'sell';
             const tradeKey = `${t.maker_order_id}_${t.price}_${t.base_amount}_${t.quote_amount}_${idx}`;
+            const rawTs = Number(t.timestamp);
+            const hasValidTs = Number.isFinite(rawTs) && rawTs > 0;
+            const localTimeFromTs = hasValidTs
+              ? new Date(rawTs < 1e12 ? rawTs * 1000 : rawTs).toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit',
+                  hour12: false,
+                })
+              : '';
             if (!tradeTimestampMap.has(tradeKey)) {
-              tradeTimestampMap.set(tradeKey, t.time || new Date().toTimeString().split(' ')[0]);
+              tradeTimestampMap.set(
+                tradeKey,
+                localTimeFromTs || new Date().toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit',
+                  hour12: false,
+                })
+              );
             }
-            const time = t.time || tradeTimestampMap.get(tradeKey) || '';
+            const time = localTimeFromTs || tradeTimestampMap.get(tradeKey) || '';
             const makerPub = pubKeyToHex(t.maker_pubkey);
             const takerPub = pubKeyToHex(t.taker_pubkey);
             return {
