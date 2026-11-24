@@ -1380,7 +1380,6 @@ import {
   type CandlestickData,
   type HistogramData,
   type UTCTimestamp,
-  type Time,
   type MouseEventParams,
 } from 'lightweight-charts';
 
@@ -1419,7 +1418,6 @@ const SUPERCONTRACT_ADDRESS = computed(() => {
     ? 'XAEKLE3WB6XJLFW75JGJJ7Y3DVQWCWX775NQNWPP'
     : 'VAEKLE3WB6XJLFW75JGJJ7Y3DVQWCWX774DDSJ2F';
 });
-const TESTNET2_VAULT_ADDRESS = SUPERCONTRACT_ADDRESS;
 
 // --- State & Types ---
 interface OrderBookEntry {
@@ -1522,13 +1520,6 @@ function formatCleanPrice(p: number | string | any): string {
   return isBnbPair.value ? num.toFixed(8) : num.toFixed(6);
 }
 
-function formatQuoteTotal(val: number | string | any): string {
-  if (val === undefined || val === null) return '0.00';
-  const num = typeof val === 'number' ? val : parseFloat(String(val));
-  if (!Number.isFinite(num)) return '0.00';
-  return isBnbPair.value ? num.toFixed(6) + ' BNB' : num.toFixed(2) + ' USDT';
-}
-
 function formatCleanTotal(val: number | string | any): string {
   if (val === undefined || val === null) return '0.00';
   const num = typeof val === 'number' ? val : parseFloat(String(val));
@@ -1536,9 +1527,6 @@ function formatCleanTotal(val: number | string | any): string {
   return isBnbPair.value ? num.toFixed(6) : num.toFixed(2);
 }
 
-const formatQuoteAvail = computed(() => {
-  return isBnbPair.value ? displayAccountBnb.value.toFixed(4) + ' BNB' : displayAccountUsdt.value.toFixed(2) + ' USDT';
-});
 
 const obTab = ref<'book' | 'trades'>('book');
 const activeTab = ref<'orders' | 'myTrades'>('orders');
@@ -1573,7 +1561,6 @@ const pancakeOracle = ref<PancakeOracleData | null>(null);
 
 // Mobile Viewport & Tab Navigation
 const isMobile = ref<boolean>(false);
-const mobileTab = ref<'trade' | 'chart' | 'orders'>('trade');
 const mobileTradeTab = ref<'trade' | 'book' | 'orders'>('trade');
 const isChartExpanded = ref<boolean>(false);
 
@@ -1718,11 +1705,6 @@ const displayAccountUsdt = computed(() => {
 
 const displayAccountBnb = computed(() => {
   return onChainBnb.value || 0;
-});
-
-// Direct Tradeable Balances (Authoritative CLOB Trading Balance with Live On-Chain Fallback before loaded)
-const hasAnyClobBalance = computed(() => {
-  return isClobBalanceLoaded.value || (userXpxBalance.value > 0) || (userUsdtBalance.value > 0) || (userBnbBalance.value > 0);
 });
 
 const totalAvailableXpx = computed(() => {
@@ -2051,7 +2033,6 @@ const spreadPct = computed(() => {
   return bestAsk > 0 ? ((spread.value / bestAsk) * 100).toFixed(2) : '0.00';
 });
 
-const spreadAmount = computed(() => spread.value);
 
 const bestBidPrice = computed(() => {
   return bids.value.length ? bids.value[0].price : currentPrice.value;
@@ -2094,34 +2075,6 @@ const askRatioPercent = computed(() => {
   return Number((100 - bidRatioPercent.value).toFixed(1));
 });
 
-// Vault balance spending check for trading
-const isInsufficientBalance = computed(() => {
-  if (!activeAccount.value) return false;
-  const amt = Number(orderAmount.value);
-  if (!amt || isNaN(amt) || amt <= 0) return false;
-  if (orderSide.value === 'buy') {
-    const requiredQuote = amt * effectiveOrderPrice.value;
-    const availVaultQuote = isBnbPair.value ? userBnbBalance.value : userUsdtBalance.value;
-    return requiredQuote > availVaultQuote;
-  } else {
-    return amt > userXpxBalance.value;
-  }
-});
-
-// Check if user has sufficient on-chain wallet funds that can be deposited into Vault
-const hasWalletFundsForDeposit = computed(() => {
-  if (!activeAccount.value) return false;
-  const amt = Number(orderAmount.value);
-  if (!amt || isNaN(amt) || amt <= 0) return false;
-  if (orderSide.value === 'buy') {
-    const requiredQuote = amt * effectiveOrderPrice.value;
-    const availWalletQuote = isBnbPair.value ? displayAccountBnb.value : displayAccountUsdt.value;
-    return availWalletQuote >= requiredQuote;
-  } else {
-    const availWalletXpx = Math.max(0, displayAccountXpx.value - 0.2);
-    return availWalletXpx >= amt;
-  }
-});
 
 
 
@@ -3444,15 +3397,6 @@ interface Candle {
 type ChartInterval = '1m' | '5m' | '15m' | '1h';
 const activeInterval = ref<ChartInterval>('1m');
 
-const intervalLabel = computed(() => {
-  switch (activeInterval.value) {
-    case '1m': return '1m Live SuperContract Ticks';
-    case '5m': return '5m Aggregate Candles';
-    case '15m': return '15m Market Trends';
-    case '1h': return '1h Daily Perspective';
-  }
-});
-
 function createSeedCandles(count: number, intervalMinutes: number, targetEndPrice: number): Candle[] {
   const nowSec = Math.floor(Date.now() / 1000);
   const intervalSec = intervalMinutes * 60;
@@ -4009,112 +3953,6 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-.header-center {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.sirius-clob-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 4px 14px 4px 6px;
-  background: linear-gradient(135deg, rgba(14, 28, 22, 0.88) 0%, rgba(8, 17, 13, 0.96) 100%);
-  border: 1px solid rgba(16, 185, 129, 0.28);
-  border-radius: 9999px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(8px);
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  user-select: none;
-  cursor: default;
-}
-
-.sirius-clob-badge:hover {
-  border-color: rgba(16, 185, 129, 0.55);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45), 0 0 16px rgba(16, 185, 129, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.14);
-  transform: translateY(-1px);
-}
-
-.badge-xpx-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 8px 3px 6px;
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.22) 0%, rgba(5, 150, 105, 0.16) 100%);
-  border: 1px solid rgba(16, 185, 129, 0.38);
-  border-radius: 9999px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
-}
-
-.badge-xpx-icon {
-  width: 14px;
-  height: 14px;
-  display: block;
-  flex-shrink: 0;
-}
-
-.badge-xpx-text {
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  color: #34d399;
-  line-height: 1;
-}
-
-.badge-divider {
-  width: 1px;
-  height: 14px;
-  background: rgba(255, 255, 255, 0.14);
-  flex-shrink: 0;
-}
-
-.badge-content {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-family: inherit;
-  font-size: 13px;
-  letter-spacing: 0.06em;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.badge-brand {
-  color: #f8fafc;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-}
-
-.badge-highlight {
-  background: linear-gradient(135deg, #10b981 0%, #34d399 45%, #38bdf8 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  font-weight: 800;
-}
-
-.badge-sub {
-  font-size: 10px;
-  color: #94a3b8;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  padding: 2px 6px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 9999px;
-}
-
-.badge-chip {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-weight: 700;
-  color: #38bdf8;
-  background: rgba(56, 189, 248, 0.12);
-  border: 1px solid rgba(56, 189, 248, 0.3);
-  padding: 3px 9px;
-  border-radius: 9999px;
-}
 
 .pair-selector {
   display: flex;
@@ -4179,68 +4017,12 @@ onUnmounted(() => {
   margin: 0 4px;
 }
 
-.supercontract-escrow-badge {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(44, 213, 138, 0.08);
-  border: 1px solid rgba(44, 213, 138, 0.22);
-  padding: 4px 12px;
-  border-radius: 9999px;
-  font-size: 11px;
-  font-weight: 600;
-  color: #2cd58a;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-}
 
 .stat-item {
   display: flex;
   flex-direction: column;
 }
 
-.pcs-stat {
-  display: flex;
-  flex-direction: column;
-}
-
-.pcs-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: #38bdf8 !important;
-  text-decoration: none;
-  font-size: 13px;
-  font-weight: 600;
-  transition: all 0.15s ease;
-}
-
-.pcs-link:hover {
-  color: #7dd3fc !important;
-  text-decoration: none;
-  filter: brightness(1.2);
-}
-
-.pcs-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #38bdf8;
-  display: inline-block;
-  box-shadow: 0 0 6px #38bdf8;
-}
-
-.pcs-tag {
-  font-size: 9px;
-  padding: 1px 4px;
-  border-radius: 4px;
-  background: rgba(56, 189, 248, 0.15);
-  border: 1px solid rgba(56, 189, 248, 0.35);
-  color: #38bdf8;
-  font-weight: 600;
-  letter-spacing: 0.2px;
-  margin-left: 2px;
-}
 
 .stat-lbl {
   font-size: 11px;
@@ -4263,24 +4045,6 @@ onUnmounted(() => {
   gap: 12px;
 }
 
-/* Primary and Secondary Action Buttons */
-.btn-primary-action {
-  background: #1eb972;
-  color: #071a12;
-  border: none;
-  padding: 6px 16px;
-  border-radius: 9999px;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 2px 10px rgba(30, 185, 114, 0.25);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.btn-primary-action:hover {
-  background: #23cb7f;
-  box-shadow: 0 4px 16px rgba(35, 203, 127, 0.35);
-  transform: translateY(-1px);
-}
 
 /* Unified Clean Wallet Balance Area */
 .wallet-balance-area {
@@ -4293,9 +4057,6 @@ onUnmounted(() => {
   border-radius: 9999px;
   font-size: 12px;
   color: #cbd5e1;
-}
-.wallet-balance-area .wallet-addr {
-  color: #7b8e87;
 }
 .wallet-balance-area .bal-val {
   color: #f8fafc;
@@ -4363,11 +4124,6 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-@media (max-width: 1200px) {
-  .header-center {
-    display: none;
-  }
-}
 
 /* Mobile Faucet Button (Testnet Header) */
 .mobile-faucet-btn {
@@ -4544,22 +4300,6 @@ onUnmounted(() => {
   padding: 8px 10px;
 }
 
-.mobile-wd-pill {
-  background: #17241f;
-  color: #94a3b8;
-  border: 1px solid #23352d;
-  border-radius: 9999px;
-  padding: 3px 9px;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.mobile-wd-pill:hover {
-  color: #f8fafc;
-  background: #23352d;
-}
 
 .mobile-ticket-card {
   background: #0a110e;
@@ -5602,27 +5342,6 @@ onUnmounted(() => {
   box-shadow: 0 2px 8px rgba(142, 48, 52, 0.25);
 }
 
-.withdraw-pill {
-  background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(236, 72, 153, 0.2));
-  color: #c084fc;
-  border: 1px solid rgba(139, 92, 246, 0.4);
-  padding: 5px 12px;
-  border-radius: 20px;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.withdraw-pill:hover {
-  background: linear-gradient(135deg, #8b5cf6, #ec4899);
-  color: #ffffff;
-  border-color: transparent;
-  transform: translateY(-1px);
-}
 
 /* Modal Styling */
 .modal-overlay {
@@ -5714,52 +5433,6 @@ onUnmounted(() => {
   display: block;
 }
 
-.asset-selector-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  margin-top: 6px;
-}
-
-.asset-btn {
-  background: #0d1512;
-  border: 1px solid #16241f;
-  color: #7b8e87;
-  padding: 8px;
-  border-radius: 9999px;
-  font-weight: 700;
-  font-size: 12px;
-  cursor: pointer;
-  text-align: center;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.asset-btn:hover {
-  border-color: rgba(44, 213, 138, 0.35);
-  color: #f8fafc;
-  background: #12221b;
-}
-
-.asset-btn.active {
-  background: #17382a;
-  border-color: rgba(44, 213, 138, 0.35);
-  color: #2cd58a;
-  box-shadow: 0 2px 8px rgba(44, 213, 138, 0.18);
-}
-
-.modal-info-box {
-  background: #1e293b;
-  border-radius: 8px;
-  padding: 12px;
-  margin-top: 16px;
-  font-size: 11px;
-}
-
-.info-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
 
 .modal-footer {
   display: flex;
