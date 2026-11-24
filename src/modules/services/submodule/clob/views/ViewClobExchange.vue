@@ -61,10 +61,13 @@
       <div class="header-right">
         <!-- User Active Wallet & Tradeable Balance Area (Desktop) -->
         <div class="wallet-balance-area font-mono mobile-hide" v-if="activeAccount">
-          <span class="bal-val text-emerald-400" title="Tradeable XPX">{{ totalAvailableXpx.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 }) }} XPX</span>
-          <span class="bal-sep">•</span>
-          <span v-if="isBnbPair" class="bal-val text-emerald-400" title="Tradeable BNB">{{ totalAvailableBnb.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) }} BNB</span>
-          <span v-else class="bal-val text-emerald-400" title="Tradeable USDT">${{ totalAvailableUsdt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} USDT</span>
+          <template v-if="isClobBalanceLoaded || hasCachedClobBalance">
+            <span class="bal-val text-emerald-400" title="Tradeable XPX">{{ totalAvailableXpx.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 }) }} XPX</span>
+            <span class="bal-sep">•</span>
+            <span v-if="isBnbPair" class="bal-val text-emerald-400" title="Tradeable BNB">{{ totalAvailableBnb.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) }} BNB</span>
+            <span v-else class="bal-val text-emerald-400" title="Tradeable USDT">${{ totalAvailableUsdt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} USDT</span>
+          </template>
+          <span v-else class="bal-val text-slate-400" title="Syncing trading account balance">Syncing balance...</span>
           <span class="bal-sep">•</span>
           <button
             v-if="hasSmartTradingAccount"
@@ -83,6 +86,15 @@
             title="2-of-2 Multisig activation confirming on Sirius L1 (~15s)"
           >
             Activating...
+          </button>
+          <button
+            v-else-if="!isTradingAccountStatusLoaded"
+            type="button"
+            class="header-action-pill pill-syncing"
+            disabled
+            title="Checking Smart Trading account status..."
+          >
+            Syncing...
           </button>
           <button
             v-else
@@ -459,7 +471,7 @@
             <div class="flex justify-between items-center mb-1 text-xs font-mono form-label-row">
               <label class="text-slate-300">Amount</label>
               <span class="text-emerald-400 font-semibold" title="Available Tradeable Balance">
-                Available: {{ orderSide === 'buy' ? (isBnbPair ? totalAvailableBnb.toFixed(4) + ' BNB' : '$' + totalAvailableUsdt.toFixed(2) + ' USDT') : (totalAvailableXpx.toLocaleString() + ' XPX') }}
+                Available: {{ (!activeAccount || isClobBalanceLoaded || hasCachedClobBalance) ? (orderSide === 'buy' ? (isBnbPair ? totalAvailableBnb.toFixed(4) + ' BNB' : '$' + totalAvailableUsdt.toFixed(2) + ' USDT') : (totalAvailableXpx.toLocaleString() + ' XPX')) : '...' }}
               </span>
             </div>
             <div class="input-box">
@@ -630,10 +642,13 @@
           <div class="flex justify-between items-center gap-2 text-xs">
             <div v-if="activeAccount" class="flex items-center gap-1.5 min-w-0 truncate">
               <span class="text-slate-400">Tradeable:</span>
-              <span class="text-emerald-400 font-mono font-bold">{{ totalAvailableXpx.toLocaleString(undefined, { maximumFractionDigits: 2 }) }} XPX</span>
-              <span class="text-slate-600">•</span>
-              <span v-if="isBnbPair" class="text-emerald-400 font-mono font-bold">{{ totalAvailableBnb.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) }} BNB</span>
-              <span v-else class="text-emerald-400 font-mono font-bold">${{ totalAvailableUsdt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} USDT</span>
+              <template v-if="isClobBalanceLoaded || hasCachedClobBalance">
+                <span class="text-emerald-400 font-mono font-bold">{{ totalAvailableXpx.toLocaleString(undefined, { maximumFractionDigits: 2 }) }} XPX</span>
+                <span class="text-slate-600">•</span>
+                <span v-if="isBnbPair" class="text-emerald-400 font-mono font-bold">{{ totalAvailableBnb.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) }} BNB</span>
+                <span v-else class="text-emerald-400 font-mono font-bold">${{ totalAvailableUsdt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} USDT</span>
+              </template>
+              <span v-else class="text-slate-400 font-mono">Syncing...</span>
             </div>
             <div v-else class="text-slate-400 text-[11px]">
               Connect wallet to manage Smart Trading &amp; balances
@@ -667,6 +682,15 @@
               title="2-of-2 Multisig activation confirming on Sirius L1 (~15s)"
             >
               Activating...
+            </button>
+            <button
+              v-else-if="!isTradingAccountStatusLoaded"
+              type="button"
+              class="header-action-pill pill-syncing"
+              disabled
+              title="Checking Smart Trading account status..."
+            >
+              Syncing...
             </button>
             <button
               v-else
@@ -1693,8 +1717,11 @@ const onChainUsdt = ref<number>(0);
 const onChainBnb = ref<number>(0);
 const isOnChainFetched = ref<boolean>(false);
 const isClobBalanceLoaded = ref<boolean>(false);
+const hasCachedClobBalance = ref<boolean>(false);
+const tradingAccountInfo = ref<any>(null);
+const isTradingAccountStatusLoaded = ref<boolean>(false);
 
-// Authoritative Real On-Chain Coins for this specific account
+// Authoritative Real On-Chain Coins for this specific account (Personal Wallet)
 const displayAccountXpx = computed(() => {
   return onChainXpx.value || 0;
 });
@@ -1708,27 +1735,16 @@ const displayAccountBnb = computed(() => {
 });
 
 const totalAvailableXpx = computed(() => {
-  let base = userXpxBalance.value;
-  if (!isClobBalanceLoaded.value && !hasSmartTradingAccount.value && displayAccountXpx.value > 0) {
-    base = Math.max(0, displayAccountXpx.value - lockedXpxEscrow.value);
-  }
+  const base = userXpxBalance.value;
   return Math.max(0, parseFloat((base - 0.2).toFixed(6))); // Reserve 0.2 XPX for L1 network gas
 });
 
 const totalAvailableUsdt = computed(() => {
-  let base = userUsdtBalance.value;
-  if (!isClobBalanceLoaded.value && !hasSmartTradingAccount.value && displayAccountUsdt.value > 0) {
-    base = Math.max(0, displayAccountUsdt.value - lockedUsdtEscrow.value);
-  }
-  return parseFloat(base.toFixed(2));
+  return parseFloat(userUsdtBalance.value.toFixed(2));
 });
 
 const totalAvailableBnb = computed(() => {
-  let base = userBnbBalance.value;
-  if (!isClobBalanceLoaded.value && !hasSmartTradingAccount.value && displayAccountBnb.value > 0) {
-    base = Math.max(0, displayAccountBnb.value - lockedBnbEscrow.value);
-  }
-  return parseFloat(base.toFixed(6));
+  return parseFloat(userBnbBalance.value.toFixed(6));
 });
 
 // Total tradeable spending check across entire unified balance
@@ -1839,8 +1855,16 @@ watch(
       const existingOwnerAddr = normalizeAddrStr(tradingAccountInfo.value?.tradingAccount?.ownerAddress);
       const keepExistingTradingInfo = Boolean(existingOwnerAddr && existingOwnerAddr === rawAddr);
       isClobBalanceLoaded.value = false;
+      hasCachedClobBalance.value = localStorage.getItem(`clob_bal_${rawAddr}_xpx`) !== null;
       if (!keepExistingTradingInfo) {
-        tradingAccountInfo.value = null;
+        const cachedTradingInfo = readCachedTradingAccountInfo(rawAddr);
+        if (cachedTradingInfo) {
+          tradingAccountInfo.value = cachedTradingInfo;
+          isTradingAccountStatusLoaded.value = true;
+        } else {
+          tradingAccountInfo.value = null;
+          isTradingAccountStatusLoaded.value = false;
+        }
       }
       // Immediately reset and isolate balances to the new account, preventing cross-wallet leaks
       userXpxBalance.value = parseFloat(localStorage.getItem(`clob_bal_${rawAddr}_xpx`) || '0');
@@ -2336,7 +2360,6 @@ function unlockTradingSession() {
 type ClobAsset = 'XPX' | 'USDT' | 'BNB';
 const CLOB_ASSETS: ClobAsset[] = ['XPX', 'USDT', 'BNB'];
 
-const tradingAccountInfo = ref<any>(null);
 const validatorClusterInfo = ref<any>(null);
 const showTradingSetupModal = ref<boolean>(false);
 const showTopUpModal = ref<boolean>(false);
@@ -2412,6 +2435,47 @@ function getActiveSiriusNodeEndpoint(): string {
   return nodeEndpoint;
 }
 
+function getTradingAccountCacheKey(rawAddr: string): string {
+  const clean = normalizeAddrStr(rawAddr);
+  return clean ? `clob_trading_info_${getActiveNetworkId()}_${clean}` : '';
+}
+
+function readCachedTradingAccountInfo(rawAddr: string): any | null {
+  try {
+    const key = getTradingAccountCacheKey(rawAddr);
+    if (!key) return null;
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && typeof parsed.hasTradingAccount === 'boolean') {
+      return parsed;
+    }
+  } catch (_) {}
+  return null;
+}
+
+function writeCachedTradingAccountInfo(rawAddr: string, data: any) {
+  try {
+    const key = getTradingAccountCacheKey(rawAddr);
+    if (!key || !data) return;
+    const minimal = {
+      ok: true,
+      hasTradingAccount: Boolean(data.hasTradingAccount),
+      status: data.status || 'none',
+      tradingAccount: data.tradingAccount
+        ? {
+            ownerAddress: data.tradingAccount.ownerAddress || '',
+            ownerPublicKey: data.tradingAccount.ownerPublicKey || '',
+            tradingAddress: data.tradingAccount.tradingAddress || '',
+            tradingPublicKey: data.tradingAccount.tradingPublicKey || '',
+          }
+        : null,
+      pendingSettlementsCount: Number(data.pendingSettlementsCount || 0),
+    };
+    localStorage.setItem(key, JSON.stringify(minimal));
+  } catch (_) {}
+}
+
 async function fetchTradingAccountStatus() {
   const queryAcc = activeAccount.value || selectedWalletAccount.value;
   if (!queryAcc?.publicKey && !queryAcc?.address) return;
@@ -2424,10 +2488,19 @@ async function fetchTradingAccountStatus() {
       const data = await res.json();
       if (data.ok) {
         tradingAccountInfo.value = data;
+        if (queryAcc.address) {
+          writeCachedTradingAccountInfo(queryAcc.address, data);
+        }
         if (data.validatorCluster) {
           validatorClusterInfo.value = data.validatorCluster;
         }
         const tAcc = data.tradingAccount;
+        if (tAcc?.ownerAddress) {
+          writeCachedTradingAccountInfo(tAcc.ownerAddress, data);
+        }
+        if (tAcc?.tradingAddress) {
+          writeCachedTradingAccountInfo(tAcc.tradingAddress, data);
+        }
         if (tAcc?.ownerAddress || tAcc?.ownerPublicKey) {
           const sel: any = selectedWalletAccount.value;
           if (sel && normalizeAddrStr(sel.address) === normalizeAddrStr(tAcc.tradingAddress)) {
@@ -2441,7 +2514,10 @@ async function fetchTradingAccountStatus() {
         }
       }
     }
-  } catch (_) {}
+  } catch (_) {
+  } finally {
+    isTradingAccountStatusLoaded.value = true;
+  }
 }
 
 function openTradingSetupModal() {
@@ -5636,6 +5712,13 @@ onUnmounted(() => {
   background: rgba(245, 158, 11, 0.14);
   border-color: rgba(245, 158, 11, 0.35);
   color: #fbbf24;
+  cursor: wait;
+}
+
+.pill-syncing {
+  background: rgba(30, 41, 59, 0.7);
+  border-color: rgba(51, 65, 85, 0.8);
+  color: #94a3b8;
   cursor: wait;
 }
 
