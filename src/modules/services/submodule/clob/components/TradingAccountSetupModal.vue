@@ -586,6 +586,9 @@ async function activate() {
 .trading-setup-card {
   width: 100%;
   max-width: 480px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   background: #0c1411;
   border: 1px solid #1e352c;
   border-radius: 14px;

@@ -616,6 +616,13 @@
               </button>
             </div>
           </div>
+          <div class="mobile-market-stats font-mono" v-show="!isChartExpanded">
+            <span><span class="text-slate-500">24h H</span> {{ formatCleanPrice(high24h) }}</span>
+            <span class="text-slate-700">•</span>
+            <span><span class="text-slate-500">L</span> {{ formatCleanPrice(low24h) }}</span>
+            <span class="text-slate-700">•</span>
+            <span><span class="text-slate-500">Vol</span> {{ formatCompactNumber(volume24h) }} XPX</span>
+          </div>
           <div class="tv-chart-container mobile-tv-chart" ref="chartContainerMobileRef"></div>
         </div>
       </div>
@@ -654,19 +661,90 @@
 
       <!-- 3. TAB A: TRADE TICKET (Full-width, clean, spacious) -->
       <div v-show="mobileTradeTab === 'trade' && !isChartExpanded" class="mobile-trade-view">
-        <!-- Available Balances Header with Quick Deposit & Withdraw -->
+        <!-- Available Balances & Smart Trading Actions Card -->
         <div class="mobile-bal-card">
-          <div class="flex justify-between items-center text-xs">
-            <div class="flex items-center gap-1.5 truncate">
+          <div class="flex justify-between items-center gap-2 text-xs">
+            <div v-if="activeAccount" class="flex items-center gap-1.5 min-w-0 truncate">
               <span class="text-slate-400">Tradeable:</span>
-              <span class="text-emerald-400 font-mono font-bold">{{ totalAvailableXpx.toLocaleString(undefined, { maximumFractionDigits: 0 }) }} XPX</span>
+              <span class="text-emerald-400 font-mono font-bold">{{ totalAvailableXpx.toLocaleString(undefined, { maximumFractionDigits: 2 }) }} XPX</span>
               <span class="text-slate-600">•</span>
-              <span v-if="isBnbPair" class="text-emerald-400 font-mono font-bold">{{ totalAvailableBnb.toFixed(4) }} BNB</span>
-              <span v-else class="text-emerald-400 font-mono font-bold">${{ totalAvailableUsdt.toFixed(2) }} USDT</span>
+              <span v-if="isBnbPair" class="text-emerald-400 font-mono font-bold">{{ totalAvailableBnb.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) }} BNB</span>
+              <span v-else class="text-emerald-400 font-mono font-bold">${{ totalAvailableUsdt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} USDT</span>
             </div>
-            <div class="flex items-center flex-shrink-0">
-              <button type="button" class="mobile-wd-pill" @click="openWithdrawModal" title="Withdraw funds from CLOB Vault to L1 wallet">Withdraw</button>
+            <div v-else class="text-slate-400 text-[11px]">
+              Connect wallet to manage Smart Trading &amp; balances
             </div>
+            <button
+              v-if="activeAccount && getActiveNetworkId() === 184 && sessionTradingPrivateKey"
+              type="button"
+              @click="lockTradingSession"
+              class="lock-session-pill flex-shrink-0"
+              title="Lock trading session"
+            >
+              🔒 Lock
+            </button>
+          </div>
+
+          <div v-if="activeAccount" class="mobile-action-pills">
+            <button
+              v-if="hasSmartTradingAccount"
+              type="button"
+              class="header-action-pill pill-activated"
+              disabled
+              :title="`Smart Trading Account Active: ${tradingAccountAddress}`"
+            >
+              Smart trading activated
+            </button>
+            <button
+              v-else-if="isTradingAccountPending"
+              type="button"
+              class="header-action-pill pill-pending"
+              disabled
+              title="2-of-2 Multisig activation confirming on Sirius L1 (~15s)"
+            >
+              Activating...
+            </button>
+            <button
+              v-else
+              type="button"
+              class="header-action-pill pill-activate"
+              @click="openTradingSetupModal"
+              title="Activate Non-Custodial 2-of-2 Co-Signed Smart Trading Account"
+            >
+              Activate Smart Trading
+            </button>
+            <button
+              v-if="hasSmartTradingAccount"
+              type="button"
+              class="header-action-pill pill-topup"
+              @click="openTopUpModal"
+              title="Transfer coins from Personal Wallet to your 2-of-2 Smart Trading Account"
+            >
+              + Top Up
+            </button>
+            <button
+              type="button"
+              class="header-action-pill pill-withdraw"
+              @click="openWithdrawModal"
+              :title="hasSmartTradingAccount ? 'Co-sign non-custodial withdrawal from Smart Trading Account to Personal Wallet' : 'Withdraw funds from CLOB Vault to L1 wallet'"
+            >
+              Withdraw
+            </button>
+          </div>
+
+          <div v-if="activeAccount && hasSmartTradingAccount && pendingSettlementNotice" class="pending-settle-banner mobile-pending-banner mt-2">
+            <div class="text-[11px] text-amber-300 leading-snug">
+              ⏳ <strong>{{ pendingSettlementNotice }}</strong>
+            </div>
+            <button
+              v-if="(tradingAccountInfo?.pendingSettlementsCount || 0) > 0"
+              type="button"
+              class="settle-now-btn"
+              :disabled="isSettlingPending"
+              @click="settlePendingTradesNow"
+            >
+              {{ isSettlingPending ? 'Settling...' : 'Co-Sign & Settle' }}
+            </button>
           </div>
         </div>
 
@@ -795,6 +873,10 @@
             <div class="summary-row flex justify-between">
               <span class="text-slate-400">Order Value</span>
               <span class="font-mono text-slate-200 font-semibold">{{ formatCleanTotal(effectiveOrderPrice * (Number(orderAmount) || 0)) }} {{ quoteSymbol }}</span>
+            </div>
+            <div class="summary-row flex justify-between">
+              <span class="text-slate-400">Est. Fee</span>
+              <span class="font-mono text-slate-200">{{ estimatedFeeDisplay }}</span>
             </div>
           </div>
 
@@ -4569,14 +4651,15 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 5px;
   background: transparent;
   border: 1px solid transparent;
   color: #7b8e87;
-  padding: 8px 10px;
+  padding: 7px 6px;
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
+  white-space: nowrap;
   cursor: pointer;
   transition: all 0.2s ease;
   user-select: none;
@@ -4659,11 +4742,44 @@ onUnmounted(() => {
   gap: 8px;
 }
 
+.mobile-market-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  font-size: 10px;
+  color: #cbd5e1;
+  background: rgba(8, 13, 11, 0.7);
+  border-bottom: 1px solid #14221c;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
 .mobile-bal-card {
   background: #0d1512;
   border: 1px solid #16241f;
   border-radius: 10px;
-  padding: 8px 12px;
+  padding: 9px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mobile-action-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.mobile-action-pills .header-action-pill {
+  height: 27px;
+  padding: 0 11px;
+  font-size: 11px;
+}
+
+.mobile-pending-banner {
+  padding: 8px 10px;
 }
 
 .mobile-wd-pill {
@@ -4905,37 +5021,93 @@ onUnmounted(() => {
     display: none !important;
   }
   .clob-wrapper {
+    width: 100%;
+    max-width: 100vw;
+    box-sizing: border-box;
     padding: 8px;
     height: 100vh;
-    max-height: 100vh;
-    overflow: hidden;
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow-x: hidden;
+    overflow-y: hidden;
+  }
+  .clob-mobile-main {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
   }
   .clob-header {
-    padding: 6px 10px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding: 6px 8px;
     margin-bottom: 8px;
-    gap: 8px;
+    gap: 6px;
+    flex-wrap: wrap;
     overflow-x: visible;
   }
   .header-left {
-    gap: 8px;
-    flex-shrink: 0;
+    gap: 6px;
+    min-width: 0;
+    flex: 1 1 auto;
+    flex-shrink: 1;
   }
   .header-right {
     gap: 6px;
     flex-shrink: 0;
+    margin-left: auto;
   }
   .pair-tab-btn {
     padding: 4px 8px;
     font-size: 11px;
+    white-space: nowrap;
   }
   .back-wallet-btn {
     padding: 4px 8px;
     font-size: 11px;
   }
+  .mobile-faucet-btn {
+    padding: 4px 8px;
+    font-size: 10.5px;
+  }
   .icon-btn-dots {
-    width: 30px;
-    height: 30px;
+    width: 28px;
+    height: 28px;
     font-size: 13px;
+  }
+  .mobile-chart-panel .panel-header {
+    flex-wrap: wrap;
+    height: auto;
+    gap: 6px;
+    padding: 7px 10px;
+  }
+  .mobile-chart-panel .chart-header-left {
+    width: 100%;
+    min-width: 0;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 4px 8px;
+  }
+  .mobile-chart-panel .ohlc-bar {
+    flex-wrap: wrap;
+    gap: 4px 6px;
+    font-size: 10px;
+  }
+  .mobile-chart-panel .chart-actions {
+    width: auto;
+    margin-left: auto;
+    justify-content: flex-end;
+  }
+  .mobile-bal-card,
+  .mobile-ticket-card,
+  .mobile-mini-book-card,
+  .mobile-open-orders-card,
+  .mobile-book-panel,
+  .mobile-orders-panel {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    min-width: 0;
   }
   .dev-dropdown-popover {
     top: 38px;
@@ -4952,8 +5124,31 @@ onUnmounted(() => {
     font-size: 16px !important; /* Critical: stops iOS Safari auto-zoom on input tap */
   }
   .modal-card {
-    margin: 12px;
-    max-width: calc(100vw - 24px);
+    margin: 0;
+    max-width: 100%;
+    max-height: calc(100vh - 24px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .modal-header {
+    padding: 13px 15px;
+  }
+  .modal-body {
+    padding: 14px 15px;
+  }
+  .modal-footer {
+    padding: 12px 15px;
+    flex-wrap: wrap;
+  }
+  .pending-settle-banner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .toast-container {
+    left: 12px;
+    right: 12px;
+    bottom: 14px;
+    max-width: none;
   }
 }
 
@@ -5688,6 +5883,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 12px;
   z-index: 9999;
 }
 
@@ -5697,8 +5893,10 @@ onUnmounted(() => {
   border-radius: 12px;
   width: 100%;
   max-width: 440px;
+  max-height: calc(100vh - 24px);
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .modal-header {
