@@ -3413,7 +3413,7 @@ async function submitOrder() {
       } else {
         showToast(
           'Order Placed!',
-          `Resting Order #${orderId} on book: ${data.side} ${Number(data.amount || 0).toLocaleString()} XPX @ ${formatPrice(data.price)} on ${selectedPair.value}.\nGas: ${data.gasConsumed} units across 3 nodes.`,
+          `Resting Order #${orderId} on book: ${data.side} ${Number(data.amount || 0).toLocaleString()} XPX @ ${formatPrice(data.price)} on ${selectedPair.value}.`,
           'success',
           4500
         );
