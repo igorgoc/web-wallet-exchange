@@ -2551,12 +2551,18 @@ function onTradingAccountActivated(res: any) {
     res.txHash
   );
   fetchTradingAccountStatus();
+  if (activationPollTimer) clearInterval(activationPollTimer);
   let polls = 0;
-  const t = setInterval(async () => {
+  activationPollTimer = setInterval(async () => {
     polls++;
-    await fetchTradingAccountStatus();
+    try {
+      await fetchTradingAccountStatus();
+    } catch (_) {}
     if (hasSmartTradingAccount.value || polls >= 16) {
-      clearInterval(t);
+      if (activationPollTimer) {
+        clearInterval(activationPollTimer);
+        activationPollTimer = null;
+      }
       if (hasSmartTradingAccount.value) {
         showToast('Smart Trading Account Active!', 'Your 2-of-2 Smart Trading Account is confirmed on Sirius L1!', 'success', 5000);
         syncFromNode();
@@ -2675,7 +2681,7 @@ function parseAssetAmounts(amountsMap: Record<ClobAsset, string>): Array<{ asset
   const entries: Array<{ asset: ClobAsset; amount: number }> = [];
   for (const asset of CLOB_ASSETS) {
     const val = parseFloat(amountsMap[asset]);
-    if (!isNaN(val) && val > 0) {
+    if (Number.isFinite(val) && val > 0) {
       entries.push({ asset, amount: val });
     }
   }
@@ -2789,12 +2795,18 @@ async function executeTopUp() {
     );
     showTopUpModal.value = false;
     topUpAmounts.value = { XPX: '', USDT: '', BNB: '' };
+    if (topUpPollTimer) clearInterval(topUpPollTimer);
     let polls = 0;
-    const poller = setInterval(async () => {
+    topUpPollTimer = setInterval(async () => {
       polls++;
-      await fetchTradingAccountStatus();
-      await syncFromNode();
-      if (polls >= 12) clearInterval(poller);
+      try {
+        await fetchTradingAccountStatus();
+        await syncFromNode();
+      } catch (_) {}
+      if (polls >= 12 && topUpPollTimer) {
+        clearInterval(topUpPollTimer);
+        topUpPollTimer = null;
+      }
     }, 2500);
   } catch (err: any) {
     topUpError.value = err?.message || 'Top-up transfer failed';
@@ -2840,6 +2852,9 @@ async function cosignVerifiedSettlement(
     const ownerPubUpper = String(signer.publicKey || '').toUpperCase();
     const tradingPubUpper = String(tradingAccountPublicKey.value || settlement.tradingPublicKey || '').toUpperCase();
     const tradingAddrUpper = normalizeAddrStr(tradingAccountAddress.value);
+    if (!tradingPubUpper) {
+      return { ok: false, error: 'Trading Account metadata not loaded yet; refusing blind cosignature' };
+    }
     const outByHex = new Map<string, bigint>();
     const inByHex = new Map<string, bigint>();
 
@@ -3801,6 +3816,8 @@ function renderChart() {
 // Node Sync State
 const tradeTimestampMap = new Map<string, string>();
 let pollTimer: any = null;
+let activationPollTimer: any = null;
+let topUpPollTimer: any = null;
 
 async function syncFromNode() {
   try {
@@ -4037,6 +4054,14 @@ onUnmounted(() => {
     chart = null;
   }
   if (pollTimer) clearInterval(pollTimer);
+  if (activationPollTimer) {
+    clearInterval(activationPollTimer);
+    activationPollTimer = null;
+  }
+  if (topUpPollTimer) {
+    clearInterval(topUpPollTimer);
+    topUpPollTimer = null;
+  }
 });
 </script>
 
