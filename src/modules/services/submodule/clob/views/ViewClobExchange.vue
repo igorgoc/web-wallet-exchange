@@ -370,7 +370,7 @@
             </div>
             <div class="market-trades-list">
               <div 
-                v-for="(trade, idx) in trades.slice(0, 50)" 
+                v-for="(trade, idx) in trades.slice(0, 100)" 
                 :key="idx" 
                 class="trade-row"
               >
@@ -3779,14 +3779,21 @@ async function syncFromNode() {
       isConnected.value = false;
     }
 
-    // 2. Sync Real Trades from Replicator Drive for Selected Pair (with persistent timestamps)
-    const resTrades = await fetch(`${CLOB_API_BASE}/api/clob/trades?pair=${pairParam}`);
+    // 2. Sync Real Trades from Replicator Drive for Selected Pair (newest-first, 100-trade FIFO cap)
+    const resTrades = await fetch(`${CLOB_API_BASE}/api/clob/trades?pair=${pairParam}&limit=100`);
     if (resTrades.ok) {
       const tradeData = await resTrades.json();
       if (Array.isArray(tradeData)) {
         // Prevent transient UI trades wipeout: only update if trades exist or if local list is empty
         if (tradeData.length > 0 || trades.value.length === 0) {
-          trades.value = tradeData.slice().reverse().map((t: any, idx: number) => {
+          // Backend returns newest-first (FIFO trimmed to 100). Sort by timestamp descending as an extra guarantee
+          // and strictly cap at 100 newest trades (dropping oldest FIFO).
+          const orderedNewestFirst = tradeData
+            .map((t: any, idx: number) => ({ t, idx, ts: Number(t.timestamp) || 0 }))
+            .sort((a, b) => (b.ts !== a.ts ? b.ts - a.ts : a.idx - b.idx))
+            .slice(0, 100);
+
+          trades.value = orderedNewestFirst.map(({ t, idx }) => {
             const price = t.price / 100_000_000;
             const amount = t.base_amount / 1_000_000;
             const side = (t.taker_side === 'Buy' || t.taker_side === 0) ? 'buy' : 'sell';
