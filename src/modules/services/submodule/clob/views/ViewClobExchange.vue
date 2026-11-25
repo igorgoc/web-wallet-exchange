@@ -2804,7 +2804,10 @@ async function executeTopUp() {
   }
 }
 
-async function cosignVerifiedSettlement(settlement: any): Promise<{ ok: boolean; txHash?: string; error?: string }> {
+async function cosignVerifiedSettlement(
+  settlement: any,
+  options: { silentToast?: boolean } = {}
+): Promise<{ ok: boolean; txHash?: string; status?: string; approvedCount?: number; error?: string }> {
   if (!settlement || !settlement.settlementId || !settlement.aggregatePayload) return { ok: false };
   if (cosigningSettlementIds.has(settlement.settlementId) || cosignedSettlementIds.has(settlement.settlementId)) {
     return { ok: false };
@@ -2963,7 +2966,10 @@ async function cosignVerifiedSettlement(settlement: any): Promise<{ ok: boolean;
     const data = await res.json();
     if (data.ok) {
       cosignedSettlementIds.add(settlement.settlementId);
-      if (!shownSettlementToastIds.has(settlement.settlementId) && !data.alreadySubmitted) {
+      const approvedCount = Array.isArray(data.approvedByNodes) ? data.approvedByNodes.length : 0;
+      if (options.silentToast) {
+        shownSettlementToastIds.add(settlement.settlementId);
+      } else if (!shownSettlementToastIds.has(settlement.settlementId) && !data.alreadySubmitted) {
         shownSettlementToastIds.add(settlement.settlementId);
         if (data.status === 'pending_cosign') {
           showToast(
@@ -2975,14 +2981,14 @@ async function cosignVerifiedSettlement(settlement: any): Promise<{ ok: boolean;
         } else if (data.txHash) {
           showToast(
             'Atomic L1 Settlement Broadcast!',
-            `2-of-2 Peer-to-Peer swap signed by you & ${(data.approvedByNodes || []).length} validator nodes.`,
+            `2-of-2 Peer-to-Peer swap signed by you & ${approvedCount} validator nodes.`,
             'trade',
             5000,
             data.txHash
           );
         }
       }
-      return { ok: true, txHash: data.txHash };
+      return { ok: true, txHash: data.txHash, status: data.status, approvedCount };
     }
     if (!data.ok) {
       console.warn('[Settlement Cosign] Rejected:', data.error);
@@ -3330,9 +3336,9 @@ async function submitOrder() {
       applyBalances(data.balances);
 
       // Immediately co-sign atomic L1 trade settlement if user's Smart Trading Account filled
-      let settleRes: { ok: boolean; txHash?: string; error?: string } | null = null;
+      let settleRes: { ok: boolean; txHash?: string; status?: string; approvedCount?: number; error?: string } | null = null;
       if (data.pendingSettlement) {
-        settleRes = await cosignVerifiedSettlement(data.pendingSettlement).catch((e: any) => ({
+        settleRes = await cosignVerifiedSettlement(data.pendingSettlement, { silentToast: true }).catch((e: any) => ({
           ok: false,
           error: e?.message || 'Settlement co-signing failed',
         }));
@@ -3347,15 +3353,28 @@ async function submitOrder() {
           7500
         );
       } else if (data.fillsCount > 0) {
-        const txHashToShow = settleRes?.txHash || data.settlementTxHash;
-        const txMsg = txHashToShow ? `\n🔗 Catapult Settlement Tx: ${txHashToShow.slice(0, 16)}...` : '';
-        showToast(
-          'Trade Executed!',
-          `${data.type} ${data.side} order matched via 3/3 BFT Consensus on ${selectedPair.value}!\nExchange balance updated! Click 'Withdraw' to move coins to your L1 wallet anytime.${txMsg}`,
-          'trade',
-          5000,
-          txHashToShow
-        );
+        const actionVerb = String(data.side || '').toLowerCase() === 'sell' ? 'Sold' : 'Bought';
+        const filledQty = Number(data.filledAmount || data.amount || 0).toLocaleString();
+        if (settleRes?.ok && settleRes.status === 'pending_cosign') {
+          showToast(
+            'Trade Matched — Waiting for Counterparty',
+            `${actionVerb} ${filledQty} XPX on ${selectedPair.value}. Your co-signature is recorded; L1 settlement will broadcast once the counterparty co-signs.`,
+            'info',
+            6000
+          );
+        } else {
+          const txHashToShow = settleRes?.txHash || data.settlementTxHash;
+          const summaryMsg = settleRes?.ok && txHashToShow
+            ? `${actionVerb} ${filledQty} XPX on ${selectedPair.value}. Co-signed by your wallet & ${settleRes.approvedCount || 2} validator nodes and sent to Sirius L1 (confirms in ~15s).`
+            : `${actionVerb} ${filledQty} XPX on ${selectedPair.value}. Your trading balance has been updated.`;
+          showToast(
+            'Trade Executed & Settled!',
+            summaryMsg,
+            'trade',
+            6000,
+            txHashToShow
+          );
+        }
       } else if (orderType.value === 'Market') {
         showToast(
           'Market Order Unfilled',
