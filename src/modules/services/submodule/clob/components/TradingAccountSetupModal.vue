@@ -192,13 +192,17 @@ async function scanExistingTradingAccounts() {
   const results: DetectedTradingAccount[] = [];
   for (const item of byAddr.values()) {
     let hasAssets = false;
+    let accountVerifiedEmpty = false;
     let balSummary = '0 XPX';
     let isMultisig = false;
+    let multisigVerifiedNone = false;
     let matchesCurrentCluster = false;
 
     try {
       const accRes = await fetch(`${nodeUrl}/account/${item.address}`);
-      if (accRes.ok) {
+      if (accRes.status === 404) {
+        accountVerifiedEmpty = true;
+      } else if (accRes.ok) {
         const accJson = await accRes.json();
         const mosaics = accJson?.account?.mosaics || [];
         if (mosaics.length > 0) {
@@ -219,13 +223,17 @@ async function scanExistingTradingAccounts() {
             else parts.push(`${amt.toFixed(2)} Mosaic`);
           }
           balSummary = parts.length > 0 ? parts.join(' • ') : '0 XPX';
+        } else {
+          accountVerifiedEmpty = true;
         }
       }
     } catch (_) {}
 
     try {
       const msRes = await fetch(`${nodeUrl}/account/${item.address}/multisig`);
-      if (msRes.ok) {
+      if (msRes.status === 404) {
+        multisigVerifiedNone = true;
+      } else if (msRes.ok) {
         const msJson = await msRes.json();
         const ms = msJson?.multisig;
         if (ms && ms.minApproval >= 2) {
@@ -234,11 +242,14 @@ async function scanExistingTradingAccounts() {
           if (clusterPub && cosigs.includes(clusterPub)) {
             matchesCurrentCluster = true;
           }
+        } else {
+          multisigVerifiedNone = true;
         }
       }
     } catch (_) {}
 
-    let statusLabel = 'Empty / Failed';
+    const verifiedEmptyOrphan = !isMultisig && !hasAssets && accountVerifiedEmpty && multisigVerifiedNone;
+    let statusLabel = verifiedEmptyOrphan ? 'Empty / Failed' : 'Unverified (RPC Unavailable)';
     let badgeClass = 'badge-muted';
     if (matchesCurrentCluster) {
       statusLabel = 'Active (Current Node)';
@@ -258,7 +269,7 @@ async function scanExistingTradingAccounts() {
       balanceText: balSummary,
       statusLabel,
       badgeClass,
-      isEmptyOrphan: !isMultisig && !hasAssets,
+      isEmptyOrphan: verifiedEmptyOrphan,
     });
   }
   detectedAccounts.value = results;
@@ -294,7 +305,10 @@ function stopElapsedTimer() {
   }
 }
 
+let isComponentMounted = true;
+
 onUnmounted(() => {
+  isComponentMounted = false;
   stopElapsedTimer();
 });
 
@@ -348,6 +362,7 @@ async function activate() {
     try {
       const pwd = new Password(passwordInput.value);
       ownerPriv = WalletUtils.decryptPrivateKey(pwd, props.activeAccount.encrypted, props.activeAccount.iv);
+      passwordInput.value = '';
     } catch (_) {
       errorMsg.value = 'Incorrect wallet password.';
       return;
@@ -406,7 +421,9 @@ async function activate() {
         }
         // Poll until the 0.5 XPX sponsorship transfer confirms on L1
         for (let i = 0; i < 30; i++) {
+          if (!isComponentMounted) return;
           await new Promise((r) => setTimeout(r, 2500));
+          if (!isComponentMounted) return;
           try {
             const stRes = await fetch(`${nodeUrl}/transactionStatus/${signedFund.hash}`);
             if (stRes.ok) {
