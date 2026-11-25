@@ -2367,6 +2367,8 @@ const topUpAmounts = ref<Record<ClobAsset, string>>({ XPX: '', USDT: '', BNB: ''
 const isToppingUp = ref<boolean>(false);
 const topUpError = ref<string>('');
 const cosigningSettlementIds = new Set<string>();
+const cosignedSettlementIds = new Set<string>();
+const shownSettlementToastIds = new Set<string>();
 const recentSignedOrders = new Map<string, { pair: string; side: 'buy' | 'sell'; price: string; amount: string }>();
 
 function hexToUint8(hex: string): Uint8Array {
@@ -2804,9 +2806,19 @@ async function executeTopUp() {
 
 async function cosignVerifiedSettlement(settlement: any): Promise<{ ok: boolean; txHash?: string; error?: string }> {
   if (!settlement || !settlement.settlementId || !settlement.aggregatePayload) return { ok: false };
-  if (cosigningSettlementIds.has(settlement.settlementId)) return { ok: false };
+  if (cosigningSettlementIds.has(settlement.settlementId) || cosignedSettlementIds.has(settlement.settlementId)) {
+    return { ok: false };
+  }
   const signer = getSignerAccount();
   if (!signer) return { ok: false };
+  const signerPubUpper = String(signer.publicKey || '').toUpperCase();
+  if (
+    Array.isArray(settlement.collectedCosigs) &&
+    settlement.collectedCosigs.some((c: any) => String(c?.signer || '').toUpperCase() === signerPubUpper)
+  ) {
+    cosignedSettlementIds.add(settlement.settlementId);
+    return { ok: false };
+  }
 
   cosigningSettlementIds.add(settlement.settlementId);
   try {
@@ -2949,14 +2961,27 @@ async function cosignVerifiedSettlement(settlement: any): Promise<{ ok: boolean;
       }),
     });
     const data = await res.json();
-    if (data.ok && data.txHash) {
-      showToast(
-        'Atomic L1 Settlement Broadcast!',
-        `2-of-2 Peer-to-Peer swap signed by you & ${(data.approvedByNodes || []).length} validator nodes.`,
-        'trade',
-        5000,
-        data.txHash
-      );
+    if (data.ok) {
+      cosignedSettlementIds.add(settlement.settlementId);
+      if (!shownSettlementToastIds.has(settlement.settlementId) && !data.alreadySubmitted) {
+        shownSettlementToastIds.add(settlement.settlementId);
+        if (data.status === 'pending_cosign') {
+          showToast(
+            'Cosignature Recorded',
+            'Your settlement signature is saved. Waiting for counterparty co-signature before L1 broadcast.',
+            'info',
+            5000
+          );
+        } else if (data.txHash) {
+          showToast(
+            'Atomic L1 Settlement Broadcast!',
+            `2-of-2 Peer-to-Peer swap signed by you & ${(data.approvedByNodes || []).length} validator nodes.`,
+            'trade',
+            5000,
+            data.txHash
+          );
+        }
+      }
       return { ok: true, txHash: data.txHash };
     }
     if (!data.ok) {
@@ -3906,8 +3931,13 @@ async function syncFromNode() {
         if (resSettle.ok) {
           const sData = await resSettle.json();
           if (sData.ok && Array.isArray(sData.settlements)) {
+            const myPubUpper = String(activeAccount.value?.publicKey || '').toUpperCase();
             for (const s of sData.settlements) {
-              if (s.status === 'pending_cosign') {
+              const alreadySignedByMe =
+                cosignedSettlementIds.has(s.settlementId) ||
+                (Array.isArray(s.collectedCosigs) &&
+                  s.collectedCosigs.some((c: any) => String(c?.signer || '').toUpperCase() === myPubUpper));
+              if (s.status === 'pending_cosign' && !alreadySignedByMe) {
                 cosignVerifiedSettlement(s).catch(() => {});
               }
             }
