@@ -2804,12 +2804,17 @@ async function executeTopUp() {
   }
 }
 
+function getSettlementSignKey(settlement: any): string {
+  return `${settlement?.settlementId || ''}:${settlement?.txHash || ''}`;
+}
+
 async function cosignVerifiedSettlement(
   settlement: any,
-  options: { silentToast?: boolean } = {}
+  options: { silentToast?: boolean; _retriedRebuild?: boolean } = {}
 ): Promise<{ ok: boolean; txHash?: string; status?: string; approvedCount?: number; error?: string }> {
   if (!settlement || !settlement.settlementId || !settlement.aggregatePayload) return { ok: false };
-  if (cosigningSettlementIds.has(settlement.settlementId) || cosignedSettlementIds.has(settlement.settlementId)) {
+  const signKey = getSettlementSignKey(settlement);
+  if (cosigningSettlementIds.has(signKey) || cosignedSettlementIds.has(signKey)) {
     return { ok: false };
   }
   const signer = getSignerAccount();
@@ -2819,11 +2824,11 @@ async function cosignVerifiedSettlement(
     Array.isArray(settlement.collectedCosigs) &&
     settlement.collectedCosigs.some((c: any) => String(c?.signer || '').toUpperCase() === signerPubUpper)
   ) {
-    cosignedSettlementIds.add(settlement.settlementId);
+    cosignedSettlementIds.add(signKey);
     return { ok: false };
   }
 
-  cosigningSettlementIds.add(settlement.settlementId);
+  cosigningSettlementIds.add(signKey);
   try {
     // Independently inspect aggregate payload locally before cosigning:
     // Ensure ONLY TransferTransactions exist, and outflows strictly match signed order fills
@@ -2865,7 +2870,8 @@ async function cosignVerifiedSettlement(
     if (outByHex.size > 0) {
       let verifiedOrd: { pair: string; side: 'buy' | 'sell'; price: string; amount: string } | null = null;
       const ctx = settlement.orderContext;
-      if (ctx && ctx.signature && ctx.nonce && ctx.expiry) {
+      const ctxIsMine = Boolean(ctx && (!ctx.publicKey || String(ctx.publicKey).toUpperCase() === ownerPubUpper));
+      if (ctxIsMine && ctx && ctx.signature && ctx.nonce && ctx.expiry) {
         const domainSep = String(ctx.domainSeparator || `${getActiveNetworkId()}:SiriusCLOB-v1`);
         const normPair = String(ctx.pair || 'XPX/USDT').toUpperCase().replace('_', '/');
         const normSide = String(ctx.side || '').toLowerCase() === 'sell' ? 'sell' : 'buy';
@@ -2967,13 +2973,17 @@ async function cosignVerifiedSettlement(
       }),
     });
     const data = await res.json();
+    if (data.ok && data.rebuilt && data.settlement && !options._retriedRebuild) {
+      cosigningSettlementIds.delete(signKey);
+      return await cosignVerifiedSettlement(data.settlement, { ...options, _retriedRebuild: true });
+    }
     if (data.ok) {
-      cosignedSettlementIds.add(settlement.settlementId);
+      cosignedSettlementIds.add(signKey);
       const approvedCount = Array.isArray(data.approvedByNodes) ? data.approvedByNodes.length : 0;
       if (options.silentToast) {
-        shownSettlementToastIds.add(settlement.settlementId);
-      } else if (!shownSettlementToastIds.has(settlement.settlementId) && !data.alreadySubmitted) {
-        shownSettlementToastIds.add(settlement.settlementId);
+        shownSettlementToastIds.add(signKey);
+      } else if (!shownSettlementToastIds.has(signKey) && !data.alreadySubmitted) {
+        shownSettlementToastIds.add(signKey);
         if (data.status === 'pending_cosign') {
           showToast(
             'Cosignature Recorded',
@@ -3002,7 +3012,7 @@ async function cosignVerifiedSettlement(
     console.warn('[Settlement Cosign] Notice:', err);
     return { ok: false, error: err?.message || 'Failed to cosign settlement' };
   } finally {
-    cosigningSettlementIds.delete(settlement.settlementId);
+    cosigningSettlementIds.delete(signKey);
   }
 }
 
@@ -3955,8 +3965,9 @@ async function syncFromNode() {
           if (sData.ok && Array.isArray(sData.settlements)) {
             const myPubUpper = String(activeAccount.value?.publicKey || '').toUpperCase();
             for (const s of sData.settlements) {
+              const sKey = getSettlementSignKey(s);
               const alreadySignedByMe =
-                cosignedSettlementIds.has(s.settlementId) ||
+                cosignedSettlementIds.has(sKey) ||
                 (Array.isArray(s.collectedCosigs) &&
                   s.collectedCosigs.some((c: any) => String(c?.signer || '').toUpperCase() === myPubUpper));
               if (s.status === 'pending_cosign' && !alreadySignedByMe) {
