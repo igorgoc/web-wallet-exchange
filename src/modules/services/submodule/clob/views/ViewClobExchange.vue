@@ -2936,6 +2936,9 @@ async function cosignVerifiedSettlement(
         if (outXpx > maxXpx) {
           return { ok: false, error: 'Security block: SELL settlement XPX outflow exceeds your signed order amount' };
         }
+        if (outXpx > 0n && inQuote === 0n) {
+          return { ok: false, error: `Security block: SELL settlement sends XPX without delivering ${quoteSym}` };
+        }
         if (outXpx > 0n && ordPriceTicks > 0n) {
           const minQuote = ((outXpx * ordPriceTicks) / PRICE_SCALE) * 97n / 100n;
           if (minQuote >= 100n && inQuote < minQuote) {
