@@ -3057,6 +3057,12 @@ async function cosignVerifiedSettlement(
         if (outQuote > 0n && inXpx === 0n) {
           return { ok: false, error: 'Security block: BUY settlement sends quote without delivering XPX' };
         }
+        if (inXpx > 0n && outQuote > 0n && ordPriceTicks > 0n) {
+          const maxCostForFill = ((inXpx * ordPriceTicks + PRICE_SCALE - 1n) / PRICE_SCALE) * 102n / 100n + 1000n;
+          if (outQuote > maxCostForFill) {
+            return { ok: false, error: 'Security block: BUY execution cost exceeds your signed limit price' };
+          }
+        }
       } else {
         if (outQuote > 0n) {
           return { ok: false, error: 'Security block: SELL settlement tried to send quote out of Trading Account' };
