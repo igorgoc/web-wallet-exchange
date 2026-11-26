@@ -15,12 +15,16 @@
       <div class="modal-body">
         <div class="security-Guarantee-box mb-3">
           <div class="guarantee-row">
-            <span class="badge-ok">✓</span>
-            <span>Your funds stay in your own Sirius account — never a central hot wallet.</span>
+            <span class="badge-ok">🔐</span>
+            <span><strong>2-of-2 Multisig Trading Account:</strong> The exchange will create a dedicated Sirius Trading Account where <strong>Signer 1 is your Wallet</strong> and <strong>Signer 2 is the Validator Nodes Cluster</strong>.</span>
+          </div>
+          <div class="guarantee-row">
+            <span class="badge-ok">⚡</span>
+            <span><strong>All trading uses this account:</strong> Every buy, sell, and atomic L1 settlement runs in connection with your Trading Account — neither the exchange nor any node can move your funds without your wallet.</span>
           </div>
           <div class="guarantee-row">
             <span class="badge-ok">⏳</span>
-            <span><strong>Block confirmation:</strong> Please wait ~15–30 seconds after activating (Fee: ~0.05 XPX).</span>
+            <span><strong>Block confirmation:</strong> Please wait ~15–30 seconds after activating (one-time L1 fee: ~0.25 XPX).</span>
           </div>
         </div>
 

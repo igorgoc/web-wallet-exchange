@@ -3358,6 +3358,25 @@ async function handleTradeButtonClick() {
     router.push("/wallets");
     return;
   }
+  if (!hasSmartTradingAccount.value) {
+    if (isTradingAccountPending.value) {
+      showToast(
+        "Smart Trading Account Confirming",
+        "Your 2-of-2 Smart Trading Account is confirming on Sirius L1 (~15–30s). Please wait a moment before placing orders.",
+        "info",
+        5000
+      );
+      return;
+    }
+    showToast(
+      "Activate Smart Trading First",
+      "The exchange will create a 2-of-2 Smart Trading Account (Signer 1: your Wallet, Signer 2: Validator Nodes Cluster). All trading runs through this account.",
+      "info",
+      6000
+    );
+    openTradingSetupModal();
+    return;
+  }
   // Only require session password unlock on Mainnet
   if (getActiveNetworkId() === 184 && !sessionTradingPrivateKey.value) {
     pendingAction.value = "order";
