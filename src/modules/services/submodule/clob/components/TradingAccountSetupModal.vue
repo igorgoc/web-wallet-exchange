@@ -358,16 +358,19 @@ async function activate() {
   }
 
   let ownerPriv = props.sessionKey || '';
+  let rawPassword = '';
   if (!ownerPriv) {
     if (!passwordInput.value) {
       errorMsg.value = 'Wallet password is required.';
       return;
     }
     try {
-      const pwd = new Password(passwordInput.value);
+      rawPassword = passwordInput.value;
+      const pwd = new Password(rawPassword);
       ownerPriv = WalletUtils.decryptPrivateKey(pwd, props.activeAccount.encrypted, props.activeAccount.iv);
       passwordInput.value = '';
     } catch (_) {
+      rawPassword = '';
       errorMsg.value = 'Incorrect wallet password.';
       return;
     }
@@ -402,12 +405,21 @@ async function activate() {
       });
       const bootData = await bootRes.json();
       if (!bootData.ok && bootData.needsFunding && bootData.clusterAddress) {
+        // Security: Verify backend-supplied clusterAddress matches clusterPublicKey and cap gas sponsorship <= 1 XPX
+        const expectedClusterAddr = Address.createFromPublicKey(clusterInfo.clusterPublicKey, netType).plain().replace(/[- ]/g, '').toUpperCase();
+        const suppliedClusterAddr = String(bootData.clusterAddress || '').replace(/[- ]/g, '').toUpperCase();
+        if (suppliedClusterAddr !== expectedClusterAddr) {
+          throw new Error('Security block: Bootstrap cluster address does not match validator cluster public key.');
+        }
+        const reqAtomic = BigInt(bootData.requiredAtomic || '500000');
+        if (reqAtomic <= 0n || reqAtomic > 1_000_000n) {
+          throw new Error('Security block: Requested bootstrap gas sponsorship exceeds 1.0 XPX safety cap.');
+        }
         statusMsg.value = 'Sponsoring 0.5 XPX one-time L1 gas to initialize BFT Validator Cluster (~15s)...';
         const xpxHex = netType === 184 ? '402B2F579FAEBC59' : '13BFC518E40549D7';
-        const reqAtomic = BigInt(bootData.requiredAtomic || '500000');
         const fundTx = TransferTransaction.create(
           Deadline.create(),
-          Address.createFromRawAddress(bootData.clusterAddress),
+          Address.createFromRawAddress(expectedClusterAddr),
           [new Mosaic(new MosaicId(xpxHex), UInt64.fromHex(reqAtomic.toString(16).padStart(16, '0')))],
           PlainMessage.create('CLOB Validator Cluster Bootstrap'),
           netType,
@@ -509,12 +521,12 @@ async function activate() {
 
     // Persist Trading Account into local wallet ONLY AFTER L1 activation broadcast succeeded
     const wallet = walletState.currentLoggedInWallet;
-    if (wallet && passwordInput.value) {
+    if (wallet && rawPassword) {
       try {
         const plainAddr = tradingAcc.address.plain();
         const exists = wallet.accounts.some((a: any) => a.address === plainAddr || a.publicKey === tradingAcc.publicKey);
         if (!exists) {
-          const pwdObj = WalletUtils.createPassword(passwordInput.value);
+          const pwdObj = WalletUtils.createPassword(rawPassword);
           const enc = WalletUtils.createAccountSimpleFromPrivateKey(
             `Trading (${props.activeAccount.name || 'CLOB'})`,
             pwdObj,
@@ -553,9 +565,9 @@ async function activate() {
     const nodeUrl = getSiriusNodeUrl(netType);
     let confirmedOnL1 = false;
     for (let i = 0; i < 24; i++) {
-      if (dismissedToBackground) return;
+      if (dismissedToBackground || !isComponentMounted) return;
       await new Promise((r) => setTimeout(r, 2500));
-      if (dismissedToBackground) return;
+      if (dismissedToBackground || !isComponentMounted) return;
       try {
         const stRes = await fetch(`${nodeUrl}/transactionStatus/${data.txHash}`);
         if (stRes.ok) {
@@ -586,6 +598,8 @@ async function activate() {
     pendingActivatedPayload = null;
     errorMsg.value = err?.message || 'Activation failed';
   } finally {
+    rawPassword = '';
+    passwordInput.value = '';
     stopElapsedTimer();
     isActivating.value = false;
   }

@@ -2956,6 +2956,10 @@ async function cosignVerifiedSettlement(
     if (decoded.type !== TransactionType.AGGREGATE_COMPLETE_V1 && decoded.type !== 16705) {
       return { ok: false, error: 'Invalid settlement transaction type' };
     }
+    const decodedNetType = decoded.networkType !== undefined ? decoded.networkType : decoded.version?.networkType;
+    if (decodedNetType !== getActiveNetworkId()) {
+      return { ok: false, error: `Security block: Settlement network mismatch (expected ${getActiveNetworkId()}, got ${decodedNetType})` };
+    }
     const innerTxns = decoded.innerTransactions || [];
     const ownerPubUpper = String(signer.publicKey || '').toUpperCase();
     const tradingPubUpper = String(tradingAccountPublicKey.value || settlement.tradingPublicKey || '').toUpperCase();
@@ -2979,7 +2983,9 @@ async function cosignVerifiedSettlement(
       const rAddr = recipObj && typeof recipObj.plain === 'function' ? normalizeAddrStr(recipObj.plain()) : '';
       for (const m of (inner.mosaics || [])) {
         const mHex = m.id.toHex().toUpperCase();
-        const amt = BigInt(m.amount.compact ? m.amount.compact() : m.amount);
+        const amt = m.amount && typeof m.amount.toHex === 'function'
+          ? BigInt('0x' + m.amount.toHex())
+          : BigInt(m.amount.compact ? m.amount.compact() : m.amount);
         if (tradingPubUpper && sPub === tradingPubUpper) {
           outByHex.set(mHex, (outByHex.get(mHex) || 0n) + amt);
         }
@@ -2995,7 +3001,8 @@ async function cosignVerifiedSettlement(
       const ctx = settlement.orderContext;
       const ctxIsMine = Boolean(ctx && (!ctx.publicKey || String(ctx.publicKey).toUpperCase() === ownerPubUpper));
       if (ctxIsMine && ctx && ctx.signature && ctx.nonce && ctx.expiry) {
-        const domainSep = String(ctx.domainSeparator || `${getActiveNetworkId()}:SiriusCLOB-v1`);
+        // Security: Always derive domain separator from the active network locally (blocks cross-network replay)
+        const domainSep = `${getActiveNetworkId()}:SiriusCLOB-v1`;
         const normPair = String(ctx.pair || 'XPX/USDT').toUpperCase().replace('_', '/');
         const normSide = String(ctx.side || '').toLowerCase() === 'sell' ? 'sell' : 'buy';
         const normType = String(ctx.type || '') === 'Market' ? 'Market' : 'Limit';
