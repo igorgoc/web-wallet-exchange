@@ -2465,6 +2465,8 @@ const cosigningSettlementIds = new Set<string>();
 const cosignedSettlementIds = new Set<string>();
 const shownSettlementToastIds = new Set<string>();
 const recentSignedOrders = new Map<string, { pair: string; side: 'buy' | 'sell'; price: string; amount: string }>();
+// Cumulative outflow tracker per signed order fingerprint (blocks partial-fill split over-spend attacks)
+const cumulativeOrderOutflows = new Map<string, { outXpx: bigint; outQuote: bigint; settlementIds: Set<string> }>();
 
 function hexToUint8(hex: string): Uint8Array {
   const clean = hex.replace(/^0x/i, '');
@@ -2948,7 +2950,11 @@ async function cosignVerifiedSettlement(
       return { ok: false, error: `Security block: Settlement network mismatch (expected ${getActiveNetworkId()}, got ${decodedNetType})` };
     }
     const innerTxns = decoded.innerTransactions || [];
+    if (!Array.isArray(innerTxns) || innerTxns.length === 0 || innerTxns.length > 64) {
+      return { ok: false, error: `Security block: Invalid inner transaction count (${innerTxns.length}) in settlement aggregate` };
+    }
     const ownerPubUpper = String(signer.publicKey || '').toUpperCase();
+    const ownerPubLower = ownerPubUpper.toLowerCase();
     const tradingPubUpper = String(tradingAccountPublicKey.value || settlement.tradingPublicKey || '').toUpperCase();
     const tradingAddrUpper = normalizeAddrStr(tradingAccountAddress.value);
     if (!tradingPubUpper) {
@@ -2973,6 +2979,9 @@ async function cosignVerifiedSettlement(
         const amt = m.amount && typeof m.amount.toHex === 'function'
           ? BigInt('0x' + m.amount.toHex())
           : BigInt(m.amount.compact ? m.amount.compact() : m.amount);
+        if (amt <= 0n) {
+          return { ok: false, error: 'Security block: Settlement contains zero or negative transfer amount' };
+        }
         if (tradingPubUpper && sPub === tradingPubUpper) {
           outByHex.set(mHex, (outByHex.get(mHex) || 0n) + amt);
         }
@@ -2983,39 +2992,46 @@ async function cosignVerifiedSettlement(
     }
 
     // Gap B verification: never blind-sign outflows from Trading Account without verifying against own signed order
+    // Supports BOTH Taker (orderContext) AND Maker (orderContext.participantContexts[ownerPubLower]) zero-trust!
+    let verifiedOrderFingerprint: string | null = null;
+    let verifiedOrderSide: 'buy' | 'sell' | null = null;
+    let verifiedOrderOutXpx = 0n;
+    let verifiedOrderOutQuote = 0n;
+
     if (outByHex.size > 0) {
       let verifiedOrd: { pair: string; side: 'buy' | 'sell'; price: string; amount: string } | null = null;
-      const ctx = settlement.orderContext;
-      const ctxIsMine = Boolean(ctx && (!ctx.publicKey || String(ctx.publicKey).toUpperCase() === ownerPubUpper));
-      if (ctxIsMine && ctx && ctx.signature && ctx.nonce && ctx.expiry) {
+      const rootCtx = settlement.orderContext;
+      const pMap = rootCtx && typeof rootCtx.participantContexts === 'object' ? rootCtx.participantContexts : null;
+      const participantCtx = pMap ? (pMap[ownerPubLower] || pMap[ownerPubUpper] || null) : null;
+      const candidateCtx = participantCtx || rootCtx;
+      // Strict publicKey ownership check: never assume missing publicKey belongs to the logged-in user
+      const ctxIsMine = Boolean(
+        candidateCtx &&
+        candidateCtx.publicKey &&
+        String(candidateCtx.publicKey).toUpperCase() === ownerPubUpper
+      );
+
+      if (ctxIsMine && candidateCtx && candidateCtx.signature && candidateCtx.nonce && candidateCtx.expiry) {
         // Security: Always derive domain separator from the active network locally (blocks cross-network replay)
         const domainSep = `${getActiveNetworkId()}:SiriusCLOB-v1`;
-        const normPair = String(ctx.pair || 'XPX/USDT').toUpperCase().replace('_', '/');
-        const normSide = String(ctx.side || '').toLowerCase() === 'sell' ? 'sell' : 'buy';
-        const normType = String(ctx.type || '') === 'PostOnly' ? 'PostOnly' : (String(ctx.type || '') === 'Market' ? 'Market' : 'Limit');
-        const msg = `${domainSep}:ORDER:${normPair}:${normSide}:${normType}:${String(ctx.price)}:${String(ctx.amount)}:${ctx.nonce}:${ctx.expiry}`;
+        const normPair = String(candidateCtx.pair || 'XPX/USDT').toUpperCase().replace('_', '/');
+        const normSide = String(candidateCtx.side || '').toLowerCase() === 'sell' ? 'sell' : 'buy';
+        const normType = String(candidateCtx.type || '') === 'PostOnly' ? 'PostOnly' : (String(candidateCtx.type || '') === 'Market' ? 'Market' : 'Limit');
+        const msg = `${domainSep}:ORDER:${normPair}:${normSide}:${normType}:${String(candidateCtx.price)}:${String(candidateCtx.amount)}:${candidateCtx.nonce}:${candidateCtx.expiry}`;
         const sigOk = KeyPair.verify(
           hexToUint8(ownerPubUpper),
           new TextEncoder().encode(msg),
-          hexToUint8(String(ctx.signature)),
+          hexToUint8(String(candidateCtx.signature)),
           DerivationScheme.Ed25519Sha3
         );
         if (!sigOk) {
           return { ok: false, error: 'Security block: Invalid order signature inside settlement context' };
         }
-        verifiedOrd = { pair: normPair, side: normSide, price: String(ctx.price), amount: String(ctx.amount) };
+        verifiedOrd = { pair: normPair, side: normSide, price: String(candidateCtx.price), amount: String(candidateCtx.amount) };
+        verifiedOrderFingerprint = `${ownerPubUpper}:${String(candidateCtx.nonce)}:${String(candidateCtx.signature).slice(0, 16)}`;
       } else if (settlement.orderId && recentSignedOrders.has(String(settlement.orderId))) {
         verifiedOrd = recentSignedOrders.get(String(settlement.orderId)) || null;
-      } else if (settlement.orderId) {
-        const openMatch: any = myOpenOrders.value.find((o: any) => String(o.id) === String(settlement.orderId));
-        if (openMatch) {
-          verifiedOrd = {
-            pair: String(openMatch.pair || selectedPair.value).toUpperCase().replace('_', '/'),
-            side: String(openMatch.side || '').toLowerCase() === 'sell' ? 'sell' : 'buy',
-            price: String(openMatch.price || '0'),
-            amount: String(openMatch.amount || '0'),
-          };
-        }
+        verifiedOrderFingerprint = `${ownerPubUpper}:local:${String(settlement.orderId)}`;
       }
 
       if (!verifiedOrd) {
@@ -3029,6 +3045,9 @@ async function cosignVerifiedSettlement(
       const outQuote = outByHex.get(quoteHex) || 0n;
       const inXpx = inByHex.get(xpxHex) || 0n;
       const inQuote = inByHex.get(quoteHex) || 0n;
+      verifiedOrderSide = verifiedOrd.side;
+      verifiedOrderOutXpx = outXpx;
+      verifiedOrderOutQuote = outQuote;
 
       for (const [hex] of outByHex.entries()) {
         if (hex !== xpxHex && hex !== quoteHex) {
@@ -3039,13 +3058,17 @@ async function cosignVerifiedSettlement(
       const ordAmt = parseDecBigInt(verifiedOrd.amount, 6);
       const ordPriceTicks = parseDecBigInt(verifiedOrd.price, 8);
       const PRICE_SCALE = 100_000_000n;
+      const prevAcc = verifiedOrderFingerprint ? cumulativeOrderOutflows.get(verifiedOrderFingerprint) : null;
+      const alreadyCounted = Boolean(prevAcc && prevAcc.settlementIds.has(String(settlement.settlementId)));
+      const cumOutXpx = (prevAcc && !alreadyCounted ? prevAcc.outXpx : 0n) + outXpx;
+      const cumOutQuote = (prevAcc && !alreadyCounted ? prevAcc.outQuote : 0n) + outQuote;
 
       if (verifiedOrd.side === 'buy') {
         if (outXpx > 0n) {
           return { ok: false, error: 'Security block: BUY settlement tried to send XPX out of Trading Account' };
         }
         const maxQuote = ((ordAmt * ordPriceTicks + PRICE_SCALE - 1n) / PRICE_SCALE) * 102n / 100n + 1000n;
-        if (outQuote > maxQuote) {
+        if (outQuote > maxQuote || cumOutQuote > maxQuote) {
           return { ok: false, error: 'Security block: BUY settlement quote outflow exceeds your signed order limit' };
         }
         if (outQuote > 0n && inXpx === 0n) {
@@ -3062,7 +3085,7 @@ async function cosignVerifiedSettlement(
           return { ok: false, error: 'Security block: SELL settlement tried to send quote out of Trading Account' };
         }
         const maxXpx = (ordAmt * 102n) / 100n + 1000n;
-        if (outXpx > maxXpx) {
+        if (outXpx > maxXpx || cumOutXpx > maxXpx) {
           return { ok: false, error: 'Security block: SELL settlement XPX outflow exceeds your signed order amount' };
         }
         if (outXpx > 0n && inQuote === 0n) {
@@ -3102,6 +3125,15 @@ async function cosignVerifiedSettlement(
     }
     if (data.ok) {
       cosignedSettlementIds.add(signKey);
+      if (verifiedOrderFingerprint && verifiedOrderSide) {
+        const acc = cumulativeOrderOutflows.get(verifiedOrderFingerprint) || { outXpx: 0n, outQuote: 0n, settlementIds: new Set<string>() };
+        if (!acc.settlementIds.has(String(settlement.settlementId))) {
+          acc.outXpx += verifiedOrderOutXpx;
+          acc.outQuote += verifiedOrderOutQuote;
+          acc.settlementIds.add(String(settlement.settlementId));
+          cumulativeOrderOutflows.set(verifiedOrderFingerprint, acc);
+        }
+      }
       const approvedCount = Array.isArray(data.approvedByNodes) ? data.approvedByNodes.length : 0;
       if (options.silentToast) {
         shownSettlementToastIds.add(signKey);
