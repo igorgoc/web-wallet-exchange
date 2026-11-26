@@ -2992,7 +2992,7 @@ async function cosignVerifiedSettlement(
         const domainSep = `${getActiveNetworkId()}:SiriusCLOB-v1`;
         const normPair = String(ctx.pair || 'XPX/USDT').toUpperCase().replace('_', '/');
         const normSide = String(ctx.side || '').toLowerCase() === 'sell' ? 'sell' : 'buy';
-        const normType = String(ctx.type || '') === 'Market' ? 'Market' : 'Limit';
+        const normType = String(ctx.type || '') === 'PostOnly' ? 'PostOnly' : (String(ctx.type || '') === 'Market' ? 'Market' : 'Limit');
         const msg = `${domainSep}:ORDER:${normPair}:${normSide}:${normType}:${String(ctx.price)}:${String(ctx.amount)}:${ctx.nonce}:${ctx.expiry}`;
         const sigOk = KeyPair.verify(
           hexToUint8(ownerPubUpper),

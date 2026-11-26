@@ -397,73 +397,16 @@ async function activate() {
     const netType = clusterInfo.networkType || props.networkType;
     const ownerAcc = Account.createFromPrivateKey(ownerPriv, netType, 1);
 
-    // 1b. Ensure Level-2 Validator Cluster (2-of-3) is initialized on-chain before activating Level-1
+    // 1b. Refresh cluster info from GET /validator-info (never call admin-gated POST /validator-cluster/bootstrap from user UI!)
     if (!clusterInfo.isMultisigConfirmedOnChain) {
       statusMsg.value = 'Verifying Level-2 BFT Validator Cluster on Sirius L1...';
-      const bootRes = await fetch(`${props.clobApiBase}/api/clob/validator-cluster/bootstrap`, {
-        method: 'POST',
-      });
-      const bootData = await bootRes.json();
-      if (!bootData.ok && bootData.needsFunding && bootData.clusterAddress) {
-        // Security: Verify backend-supplied clusterAddress matches clusterPublicKey and cap gas sponsorship <= 1 XPX
-        const expectedClusterAddr = Address.createFromPublicKey(clusterInfo.clusterPublicKey, netType).plain().replace(/[- ]/g, '').toUpperCase();
-        const suppliedClusterAddr = String(bootData.clusterAddress || '').replace(/[- ]/g, '').toUpperCase();
-        if (suppliedClusterAddr !== expectedClusterAddr) {
-          throw new Error('Security block: Bootstrap cluster address does not match validator cluster public key.');
+      try {
+        const freshRes = await fetch(`${props.clobApiBase}/api/clob/validator-info`);
+        const freshInfo = await freshRes.json();
+        if (freshInfo?.clusterPublicKey) {
+          clusterInfo = freshInfo;
         }
-        const reqAtomic = BigInt(bootData.requiredAtomic || '500000');
-        if (reqAtomic <= 0n || reqAtomic > 1_000_000n) {
-          throw new Error('Security block: Requested bootstrap gas sponsorship exceeds 1.0 XPX safety cap.');
-        }
-        statusMsg.value = 'Sponsoring 0.5 XPX one-time L1 gas to initialize BFT Validator Cluster (~15s)...';
-        const xpxHex = netType === 184 ? '402B2F579FAEBC59' : '13BFC518E40549D7';
-        const fundTx = TransferTransaction.create(
-          Deadline.create(),
-          Address.createFromRawAddress(expectedClusterAddr),
-          [new Mosaic(new MosaicId(xpxHex), UInt64.fromHex(reqAtomic.toString(16).padStart(16, '0')))],
-          PlainMessage.create('CLOB Validator Cluster Bootstrap'),
-          netType,
-          UInt64.fromUint(100000)
-        );
-        const signedFund = ownerAcc.preV2Sign(fundTx, genHash);
-        const nodeUrl = getSiriusNodeUrl(netType);
-        const putRes = await fetch(`${nodeUrl}/transactions`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ payload: signedFund.payload }),
-        });
-        if (!putRes.ok) {
-          throw new Error('Failed to broadcast Level-2 cluster bootstrap transfer.');
-        }
-        // Poll until the 0.5 XPX sponsorship transfer confirms on L1
-        for (let i = 0; i < 30; i++) {
-          if (!isComponentMounted) return;
-          await new Promise((r) => setTimeout(r, 2500));
-          if (!isComponentMounted) return;
-          try {
-            const stRes = await fetch(`${nodeUrl}/transactionStatus/${signedFund.hash}`);
-            if (stRes.ok) {
-              const st = await stRes.json();
-              if (st.group === 'confirmed') break;
-              if (st.group === 'failed') {
-                throw new Error(`Bootstrap transfer failed on-chain: ${st.status}`);
-              }
-            }
-          } catch (pollErr: any) {
-            if (pollErr.message?.includes('failed on-chain')) throw pollErr;
-          }
-        }
-        statusMsg.value = 'Converting BFT Validator Cluster to 2-of-3 multisig on L1 (~15s)...';
-        const bootRes2 = await fetch(`${props.clobApiBase}/api/clob/validator-cluster/bootstrap`, {
-          method: 'POST',
-        });
-        const bootData2 = await bootRes2.json();
-        if (!bootData2.ok) {
-          throw new Error(bootData2.error || 'Level-2 Validator Cluster conversion failed.');
-        }
-      } else if (!bootData.ok) {
-        throw new Error(bootData.error || 'Validator Cluster bootstrap failed.');
-      }
+      } catch (_) {}
     }
 
     // 2. Generate dedicated Smart Trading Account keypair (saved ONLY after L1 broadcast succeeds!)
