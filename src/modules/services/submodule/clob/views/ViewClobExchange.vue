@@ -311,7 +311,11 @@
                 v-for="ask in displayedAsks" 
                 :key="ask.orderId" 
                 class="ob-row ask"
+                role="button"
+                tabindex="0"
                 @click="setOrderPrice(ask.price)"
+                @keydown.enter.prevent="setOrderPrice(ask.price)"
+                @keydown.space.prevent="setOrderPrice(ask.price)"
               >
                 <div class="ob-depth-bar" :style="{ width: calcDepth(ask.amount, maxAskDepth) + '%' }"></div>
                 <span class="ob-cell font-mono">{{ formatCleanPrice(ask.price) }}</span>
@@ -340,7 +344,11 @@
                 v-for="bid in displayedBids" 
                 :key="bid.orderId" 
                 class="ob-row bid"
+                role="button"
+                tabindex="0"
                 @click="setOrderPrice(bid.price)"
+                @keydown.enter.prevent="setOrderPrice(bid.price)"
+                @keydown.space.prevent="setOrderPrice(bid.price)"
               >
                 <div class="ob-depth-bar" :style="{ width: calcDepth(bid.amount, maxBidDepth) + '%' }"></div>
                 <span class="ob-cell font-mono">{{ formatCleanPrice(bid.price) }}</span>
