@@ -1454,16 +1454,7 @@ function handleBackToWallet() {
 }
 
 // Dynamic exchange network parameters (auto-synced with backend /api/clob/config)
-const dynamicVaultAddress = ref<string>('VAEKLE3WB6XJLFW75JGJJ7Y3DVQWCWX774DDSJ2F');
 const isFaucetSupported = ref<boolean>(true);
-const SUPERCONTRACT_ADDRESS = computed(() => {
-  if (dynamicVaultAddress.value && dynamicVaultAddress.value.length === 40) {
-    return dynamicVaultAddress.value;
-  }
-  return getActiveNetworkId() === 184
-    ? 'XAEKLE3WB6XJLFW75JGJJ7Y3DVQWCWX775NQNWPP'
-    : 'VAEKLE3WB6XJLFW75JGJJ7Y3DVQWCWX774DDSJ2F';
-});
 
 // --- State & Types ---
 interface OrderBookEntry {
@@ -1742,19 +1733,6 @@ const isClobBalanceLoaded = ref<boolean>(false);
 const hasCachedClobBalance = ref<boolean>(false);
 const tradingAccountInfo = ref<any>(null);
 const isTradingAccountStatusLoaded = ref<boolean>(false);
-
-// Authoritative Real On-Chain Coins for this specific account (Personal Wallet)
-const displayAccountXpx = computed(() => {
-  return onChainXpx.value || 0;
-});
-
-const displayAccountUsdt = computed(() => {
-  return onChainUsdt.value || 0;
-});
-
-const displayAccountBnb = computed(() => {
-  return onChainBnb.value || 0;
-});
 
 const totalAvailableXpx = computed(() => {
   const base = userXpxBalance.value;
@@ -4324,7 +4302,6 @@ async function fetchClobConfig() {
     if (res.ok) {
       const data = await res.json();
       if (data && data.ok) {
-        if (data.vaultAddress) dynamicVaultAddress.value = data.vaultAddress;
         if (typeof data.faucetEnabled === 'boolean') isFaucetSupported.value = data.faucetEnabled;
       }
     }
