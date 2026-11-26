@@ -296,9 +296,10 @@
               </button>
             </div>
             <select
-              v-if="obTab === 'book'"
               v-model.number="tickGroupMultiplier"
               class="ob-tick-select"
+              :style="{ visibility: obTab === 'book' ? 'visible' : 'hidden', pointerEvents: obTab === 'book' ? 'auto' : 'none' }"
+              :tabindex="obTab === 'book' ? 0 : -1"
               title="Group Order Book price ticks"
               aria-label="Order book tick grouping"
             >
@@ -5368,8 +5369,16 @@ onUnmounted(() => {
   flex-shrink: 0;
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 48px;
   min-height: 48px;
   box-sizing: border-box;
+}
+
+.ob-header-tabs .tabs {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .ob-table-header {
