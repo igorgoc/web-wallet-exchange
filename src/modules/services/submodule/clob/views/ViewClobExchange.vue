@@ -295,6 +295,17 @@
                 Market Trades
               </button>
             </div>
+            <select
+              v-if="obTab === 'book'"
+              v-model.number="tickGroupMultiplier"
+              class="ob-tick-select"
+              title="Group Order Book price ticks"
+              aria-label="Order book tick grouping"
+            >
+              <option v-for="opt in tickGroupOptions" :key="opt.mult" :value="opt.mult">
+                {{ opt.label }}
+              </option>
+            </select>
           </div>
 
           <!-- Order Book View -->
@@ -311,6 +322,7 @@
                 v-for="ask in displayedAsks" 
                 :key="ask.orderId" 
                 class="ob-row ask"
+                :class="{ 'row-flash': flashingAskPrices.has(ask.price.toFixed(8)) }"
                 role="button"
                 tabindex="0"
                 @click="setOrderPrice(ask.price)"
@@ -344,6 +356,7 @@
                 v-for="bid in displayedBids" 
                 :key="bid.orderId" 
                 class="ob-row bid"
+                :class="{ 'row-flash': flashingBidPrices.has(bid.price.toFixed(8)) }"
                 role="button"
                 tabindex="0"
                 @click="setOrderPrice(bid.price)"
@@ -2091,16 +2104,93 @@ const effectiveOrderPrice = computed(() => {
   return orderPrice.value || (isBnbPair.value ? (pancakeOracle.value?.priceBnb || 0.00000014) : (pancakeOracle.value?.priceUsdt || 0.000076));
 });
 
-const maxAskDepth = computed(() => Math.max(...asks.value.map(a => a.amount), 1));
-const maxBidDepth = computed(() => Math.max(...bids.value.map(b => b.amount), 1));
+const tickGroupMultiplier = ref<number>(1);
+const tickGroupOptions = computed(() => {
+  const baseTick = isBnbPair.value ? 0.00000001 : 0.000001;
+  const dec = isBnbPair.value ? 8 : 6;
+  return [1, 5, 10, 50].map((mult) => ({
+    mult,
+    label: (baseTick * mult).toFixed(dec),
+  }));
+});
+
+const flashingAskPrices = ref<Set<string>>(new Set());
+const flashingBidPrices = ref<Set<string>>(new Set());
+let prevAskDepthMap = new Map<string, number>();
+let prevBidDepthMap = new Map<string, number>();
+let flashClearTimer: any = null;
+
+function triggerDepthFlash(newAsks: OrderBookEntry[], newBids: OrderBookEntry[]) {
+  const nextAskFlash = new Set<string>();
+  const nextBidFlash = new Set<string>();
+  const nextAskMap = new Map<string, number>();
+  const nextBidMap = new Map<string, number>();
+
+  for (const a of newAsks) {
+    const k = a.price.toFixed(8);
+    nextAskMap.set(k, a.amount);
+    if (prevAskDepthMap.size > 0 && prevAskDepthMap.get(k) !== a.amount) {
+      nextAskFlash.add(k);
+    }
+  }
+  for (const b of newBids) {
+    const k = b.price.toFixed(8);
+    nextBidMap.set(k, b.amount);
+    if (prevBidDepthMap.size > 0 && prevBidDepthMap.get(k) !== b.amount) {
+      nextBidFlash.add(k);
+    }
+  }
+  prevAskDepthMap = nextAskMap;
+  prevBidDepthMap = nextBidMap;
+
+  if (nextAskFlash.size > 0 || nextBidFlash.size > 0) {
+    flashingAskPrices.value = nextAskFlash;
+    flashingBidPrices.value = nextBidFlash;
+    if (flashClearTimer) clearTimeout(flashClearTimer);
+    flashClearTimer = setTimeout(() => {
+      flashingAskPrices.value = new Set();
+      flashingBidPrices.value = new Set();
+    }, 450);
+  }
+}
+
+function groupOrderBookRows(rows: OrderBookEntry[], side: 'ask' | 'bid'): OrderBookEntry[] {
+  const mult = tickGroupMultiplier.value;
+  if (mult <= 1 || rows.length === 0) return rows;
+  const baseTick = isBnbPair.value ? 0.00000001 : 0.000001;
+  const step = baseTick * mult;
+  const buckets = new Map<string, OrderBookEntry>();
+  for (const r of rows) {
+    const bucketIdx = side === 'ask' ? Math.ceil(r.price / step - 1e-12) : Math.floor(r.price / step + 1e-12);
+    const bucketPrice = Number((bucketIdx * step).toFixed(8));
+    const key = bucketPrice.toFixed(8);
+    const existing = buckets.get(key);
+    if (existing) {
+      existing.amount += r.amount;
+      existing.total = existing.price * existing.amount;
+    } else {
+      buckets.set(key, {
+        ...r,
+        price: bucketPrice,
+        total: bucketPrice * r.amount,
+      });
+    }
+  }
+  const list = Array.from(buckets.values());
+  list.sort((a, b) => (side === 'ask' ? a.price - b.price : b.price - a.price));
+  return list;
+}
+
+const maxAskDepth = computed(() => Math.max(...displayedAsks.value.map(a => a.amount), 1));
+const maxBidDepth = computed(() => Math.max(...displayedBids.value.map(b => b.amount), 1));
 
 // 14 rows per side; fills the vertical height symmetrically with the right-side order entry panel
 const displayedAsks = computed(() => {
-  return asks.value.slice(0, 14).reverse();
+  return groupOrderBookRows(asks.value, 'ask').slice(0, 14).reverse();
 });
 
 const displayedBids = computed(() => {
-  return bids.value.slice(0, 14);
+  return groupOrderBookRows(bids.value, 'bid').slice(0, 14);
 });
 
 // Dynamic Order Book Depth Ratio (Dribbble pill style: 49.1% Bid vs 50.9% Ask)
@@ -3811,8 +3901,9 @@ function initTradingViewChart() {
     }
   });
 
-  // Populate data for active interval
+  // Populate data for active interval & draw open limit order lines
   loadCandlesToChart();
+  syncChartOrderLines();
 
   // ResizeObserver for smooth responsive resizing
   if (resizeObserver) resizeObserver.disconnect();
@@ -3830,9 +3921,48 @@ function renderChart() {
   loadCandlesToChart();
 }
 
-// Node Sync State
+let chartOrderLines: any[] = [];
+
+function clearChartOrderLines() {
+  if (candleSeries && chartOrderLines.length > 0) {
+    for (const line of chartOrderLines) {
+      try {
+        candleSeries.removePriceLine(line);
+      } catch (_) {}
+    }
+  }
+  chartOrderLines = [];
+}
+
+function syncChartOrderLines() {
+  if (!candleSeries) return;
+  clearChartOrderLines();
+  for (const ord of myOpenOrders.value.slice(0, 10)) {
+    const p = Number(ord.price);
+    if (!Number.isFinite(p) || p <= 0) continue;
+    const isBuy = String(ord.side || '').toLowerCase() === 'buy';
+    try {
+      const line = candleSeries.createPriceLine({
+        price: p,
+        color: isBuy ? '#10b981' : '#ef4444',
+        lineWidth: 1,
+        lineStyle: 2, // Dashed
+        axisLabelVisible: true,
+        title: `${isBuy ? 'BUY' : 'SELL'} ${Number(ord.amount || 0).toLocaleString()} XPX`,
+      });
+      chartOrderLines.push(line);
+    } catch (_) {}
+  }
+}
+
+watch(myOpenOrders, () => {
+  syncChartOrderLines();
+}, { deep: true });
+
+// Node Sync State + Real-Time WebSocket Client (/ws/clob)
 const tradeTimestampMap = new Map<string, string>();
 let pollTimer: any = null;
+let pollTickCount = 0;
 let activationPollTimer: any = null;
 let topUpPollTimer: any = null;
 let syncInFlight = false;
@@ -3840,6 +3970,190 @@ let syncGeneration = 0;
 let lastDepthSig = '';
 let lastTradesSig = '';
 let lastOpenOrdersSig = '';
+
+const wsConnected = ref<boolean>(false);
+let clobWs: WebSocket | null = null;
+let wsReconnectTimer: any = null;
+let wsReconnectAttempts = 0;
+let wsDisposed = false;
+
+function getClobWsUrl(): string {
+  const pairParam = selectedPair.value.toLowerCase().replace('/', '_');
+  const pubKey = activeAccount.value?.publicKey || '';
+  const base = CLOB_API_BASE.replace(/^https:/i, 'wss:').replace(/^http:/i, 'ws:').replace(/\/+$/, '');
+  const qs = `pair=${encodeURIComponent(pairParam)}${pubKey ? `&publicKey=${encodeURIComponent(pubKey)}` : ''}`;
+  return `${base}/ws/clob?${qs}`;
+}
+
+function sendWsSubscribe() {
+  if (!clobWs || clobWs.readyState !== WebSocket.OPEN) return;
+  const pairParam = selectedPair.value.toLowerCase().replace('/', '_');
+  const pubKey = activeAccount.value?.publicKey || '';
+  try {
+    clobWs.send(JSON.stringify({ type: 'subscribe', pair: pairParam, publicKey: pubKey || undefined }));
+  } catch (_) {}
+}
+
+function applyDepthPayload(data: any, pairParam: string) {
+  isConnected.value = true;
+  const parsedBids = (data?.bids || []).map((b: any, idx: number) => ({
+    price: b.price / 100_000_000,
+    amount: b.total_depth / 1_000_000,
+    total: (b.price / 100_000_000) * (b.total_depth / 1_000_000),
+    orderId: 100 + idx,
+    owner: 'On-Chain'
+  }));
+  const parsedAsks = (data?.asks || []).map((a: any, idx: number) => ({
+    price: a.price / 100_000_000,
+    amount: a.total_depth / 1_000_000,
+    total: (a.price / 100_000_000) * (a.total_depth / 1_000_000),
+    orderId: 200 + idx,
+    owner: 'On-Chain'
+  }));
+  const depthSig = `${pairParam}:${parsedBids.length}:${parsedAsks.length}:${parsedBids[0]?.price || 0}:${parsedBids[0]?.amount || 0}:${parsedAsks[0]?.price || 0}:${parsedAsks[0]?.amount || 0}`;
+  if (depthSig !== lastDepthSig) {
+    lastDepthSig = depthSig;
+    triggerDepthFlash(parsedAsks, parsedBids);
+    bids.value = parsedBids;
+    asks.value = parsedAsks;
+  }
+}
+
+function applyTradesPayload(tradeData: any[], pairParam: string) {
+  if (!Array.isArray(tradeData)) return;
+  if (tradeData.length === 0 && trades.value.length > 0) return;
+  const orderedNewestFirst = tradeData
+    .map((t: any, idx: number) => ({ t, idx, ts: Number(t.timestamp) || 0 }))
+    .sort((a, b) => (b.ts !== a.ts ? b.ts - a.ts : a.idx - b.idx))
+    .slice(0, 100);
+
+  const top = orderedNewestFirst[0]?.t;
+  const tradesSig = `${pairParam}:${orderedNewestFirst.length}:${top?.maker_order_id || ''}:${top?.price || ''}:${top?.base_amount || ''}:${top?.timestamp || ''}`;
+  if (tradesSig === lastTradesSig) return;
+  lastTradesSig = tradesSig;
+  const activeKeys = new Set<string>();
+  trades.value = orderedNewestFirst.map(({ t, idx }) => {
+    const price = t.price / 100_000_000;
+    const amount = t.base_amount / 1_000_000;
+    const side = (t.taker_side === 'Buy' || t.taker_side === 0) ? 'buy' : 'sell';
+    const tradeKey = `${t.maker_order_id}_${t.price}_${t.base_amount}_${t.quote_amount}_${idx}`;
+    activeKeys.add(tradeKey);
+    const rawTs = Number(t.timestamp);
+    const hasValidTs = Number.isFinite(rawTs) && rawTs > 0;
+    const localTimeFromTs = hasValidTs
+      ? new Date(rawTs < 1e12 ? rawTs * 1000 : rawTs).toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false,
+        })
+      : '';
+    if (!tradeTimestampMap.has(tradeKey)) {
+      tradeTimestampMap.set(
+        tradeKey,
+        localTimeFromTs || new Date().toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false,
+        })
+      );
+    }
+    const time = localTimeFromTs || tradeTimestampMap.get(tradeKey) || '';
+    const makerPub = pubKeyToHex(t.maker_pubkey);
+    const takerPub = pubKeyToHex(t.taker_pubkey);
+    return {
+      price,
+      amount,
+      side,
+      takerSide: side,
+      maker_pubkey: makerPub,
+      taker_pubkey: takerPub,
+      time
+    };
+  });
+  if (tradeTimestampMap.size > 150) {
+    for (const k of Array.from(tradeTimestampMap.keys())) {
+      if (!activeKeys.has(k)) tradeTimestampMap.delete(k);
+    }
+  }
+  const latest = trades.value[0];
+  if (latest) {
+    currentPrice.value = latest.price;
+    lastTradeSide.value = latest.side;
+    updateChartPrice(latest.price);
+  }
+}
+
+function connectClobWs() {
+  if (wsDisposed || typeof WebSocket === 'undefined') return;
+  if (clobWs && (clobWs.readyState === WebSocket.OPEN || clobWs.readyState === WebSocket.CONNECTING)) return;
+  try {
+    const ws = new WebSocket(getClobWsUrl());
+    clobWs = ws;
+    ws.onopen = () => {
+      wsConnected.value = true;
+      isConnected.value = true;
+      wsReconnectAttempts = 0;
+    };
+    ws.onmessage = (evt) => {
+      try {
+        const msg = JSON.parse(String(evt.data || '{}'));
+        const activePairParam = selectedPair.value.toLowerCase().replace('/', '_');
+        if (msg.market && msg.market !== activePairParam) return;
+        if (msg.type === 'snapshot') {
+          if (msg.depth) applyDepthPayload(msg.depth, activePairParam);
+          if (Array.isArray(msg.trades)) applyTradesPayload(msg.trades, activePairParam);
+        } else if (msg.type === 'depth' && msg.data) {
+          applyDepthPayload(msg.data, activePairParam);
+        } else if (msg.type === 'trades' && Array.isArray(msg.data)) {
+          applyTradesPayload(msg.data, activePairParam);
+        } else if (msg.type === 'user_event') {
+          syncFromNode().catch(() => {});
+        }
+      } catch (_) {}
+    };
+    ws.onclose = () => {
+      wsConnected.value = false;
+      if (clobWs === ws) clobWs = null;
+      if (!wsDisposed) {
+        const delayMs = Math.min(15000, 1000 * Math.pow(2, wsReconnectAttempts));
+        wsReconnectAttempts = Math.min(wsReconnectAttempts + 1, 5);
+        if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+        wsReconnectTimer = setTimeout(connectClobWs, delayMs);
+      }
+    };
+    ws.onerror = () => {
+      try { ws.close(); } catch (_) {}
+    };
+  } catch (_) {}
+}
+
+function disconnectClobWs() {
+  wsDisposed = true;
+  wsConnected.value = false;
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = null;
+  }
+  if (clobWs) {
+    try { clobWs.close(); } catch (_) {}
+    clobWs = null;
+  }
+}
+
+watch(selectedPair, () => {
+  tickGroupMultiplier.value = 1;
+  prevAskDepthMap.clear();
+  prevBidDepthMap.clear();
+  lastDepthSig = '';
+  lastTradesSig = '';
+  sendWsSubscribe();
+});
+
+watch(() => activeAccount.value?.publicKey, () => {
+  sendWsSubscribe();
+});
 
 async function syncFromNode() {
   if (syncInFlight) return;
@@ -3884,102 +4198,16 @@ async function syncFromNode() {
       return;
     }
 
-    // 1. Apply Live Depth (only mutate reactive arrays when changed to prevent redundant re-renders)
+    // 1. Apply Live Depth (reuses shared helper with flash-on-change & diffing)
     if (depthRes.status === 'fulfilled' && depthRes.value.ok) {
-      const data = depthRes.value.data;
-      isConnected.value = true;
-      const parsedBids = (data?.bids || []).map((b: any, idx: number) => ({
-        price: b.price / 100_000_000,
-        amount: b.total_depth / 1_000_000,
-        total: (b.price / 100_000_000) * (b.total_depth / 1_000_000),
-        orderId: 100 + idx,
-        owner: 'On-Chain'
-      }));
-      const parsedAsks = (data?.asks || []).map((a: any, idx: number) => ({
-        price: a.price / 100_000_000,
-        amount: a.total_depth / 1_000_000,
-        total: (a.price / 100_000_000) * (a.total_depth / 1_000_000),
-        orderId: 200 + idx,
-        owner: 'On-Chain'
-      }));
-      const depthSig = `${pairParam}:${parsedBids.length}:${parsedAsks.length}:${parsedBids[0]?.price || 0}:${parsedBids[0]?.amount || 0}:${parsedAsks[0]?.price || 0}:${parsedAsks[0]?.amount || 0}`;
-      if (depthSig !== lastDepthSig) {
-        lastDepthSig = depthSig;
-        bids.value = parsedBids;
-        asks.value = parsedAsks;
-      }
+      applyDepthPayload(depthRes.value.data, pairParam);
     } else if (depthRes.status === 'rejected' || (depthRes.status === 'fulfilled' && !depthRes.value.ok)) {
       isConnected.value = false;
     }
 
-    // 2. Apply Real Trades (newest-first, 100-trade FIFO cap, bounded tradeTimestampMap)
+    // 2. Apply Real Trades (reuses shared helper with 100-trade cap & bounded timestamp map)
     if (tradesRes.status === 'fulfilled' && tradesRes.value.ok && Array.isArray(tradesRes.value.data)) {
-      const tradeData = tradesRes.value.data;
-      if (tradeData.length > 0 || trades.value.length === 0) {
-        const orderedNewestFirst = tradeData
-          .map((t: any, idx: number) => ({ t, idx, ts: Number(t.timestamp) || 0 }))
-          .sort((a, b) => (b.ts !== a.ts ? b.ts - a.ts : a.idx - b.idx))
-          .slice(0, 100);
-
-        const top = orderedNewestFirst[0]?.t;
-        const tradesSig = `${pairParam}:${orderedNewestFirst.length}:${top?.maker_order_id || ''}:${top?.price || ''}:${top?.base_amount || ''}:${top?.timestamp || ''}`;
-        if (tradesSig !== lastTradesSig) {
-          lastTradesSig = tradesSig;
-          const activeKeys = new Set<string>();
-          trades.value = orderedNewestFirst.map(({ t, idx }) => {
-            const price = t.price / 100_000_000;
-            const amount = t.base_amount / 1_000_000;
-            const side = (t.taker_side === 'Buy' || t.taker_side === 0) ? 'buy' : 'sell';
-            const tradeKey = `${t.maker_order_id}_${t.price}_${t.base_amount}_${t.quote_amount}_${idx}`;
-            activeKeys.add(tradeKey);
-            const rawTs = Number(t.timestamp);
-            const hasValidTs = Number.isFinite(rawTs) && rawTs > 0;
-            const localTimeFromTs = hasValidTs
-              ? new Date(rawTs < 1e12 ? rawTs * 1000 : rawTs).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  second: '2-digit',
-                  hour12: false,
-                })
-              : '';
-            if (!tradeTimestampMap.has(tradeKey)) {
-              tradeTimestampMap.set(
-                tradeKey,
-                localTimeFromTs || new Date().toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  second: '2-digit',
-                  hour12: false,
-                })
-              );
-            }
-            const time = localTimeFromTs || tradeTimestampMap.get(tradeKey) || '';
-            const makerPub = pubKeyToHex(t.maker_pubkey);
-            const takerPub = pubKeyToHex(t.taker_pubkey);
-            return {
-              price,
-              amount,
-              side,
-              takerSide: side,
-              maker_pubkey: makerPub,
-              taker_pubkey: takerPub,
-              time
-            };
-          });
-          // Prune stale keys so tradeTimestampMap never grows unbounded
-          if (tradeTimestampMap.size > 150) {
-            for (const k of Array.from(tradeTimestampMap.keys())) {
-              if (!activeKeys.has(k)) tradeTimestampMap.delete(k);
-            }
-          }
-          const latest = trades.value[0];
-          if (latest) {
-            currentPrice.value = latest.price;
-            lastTradeSide.value = latest.side;
-            updateChartPrice(latest.price);
-          }
-        }
-      }
+      applyTradesPayload(tradesRes.value.data, pairParam);
     }
 
     // 3. Apply PancakeSwap Oracle
@@ -4085,10 +4313,23 @@ onMounted(() => {
   });
   fetchClobConfig();
   syncFromNode();
-  pollTimer = setInterval(syncFromNode, 3000);
+  wsDisposed = false;
+  connectClobWs();
+  pollTimer = setInterval(() => {
+    pollTickCount++;
+    // When WebSocket is connected, relax fallback REST polling to every 12s (4th tick)
+    if (wsConnected.value && pollTickCount % 4 !== 0) return;
+    syncFromNode();
+  }, 3000);
 });
 
 onUnmounted(() => {
+  disconnectClobWs();
+  clearChartOrderLines();
+  if (flashClearTimer) {
+    clearTimeout(flashClearTimer);
+    flashClearTimer = null;
+  }
   if (typeof window !== 'undefined') {
     window.removeEventListener('resize', checkMobile);
   }
@@ -5170,6 +5411,42 @@ onUnmounted(() => {
 
 .ob-row:hover {
   background: rgba(255, 255, 255, 0.03);
+}
+
+.ob-row.ask.row-flash {
+  animation: obFlashAsk 0.45s ease-out;
+}
+
+.ob-row.bid.row-flash {
+  animation: obFlashBid 0.45s ease-out;
+}
+
+@keyframes obFlashAsk {
+  0% { background: rgba(239, 68, 68, 0.28); }
+  100% { background: transparent; }
+}
+
+@keyframes obFlashBid {
+  0% { background: rgba(16, 185, 129, 0.28); }
+  100% { background: transparent; }
+}
+
+.ob-tick-select {
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  color: #cbd5e1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  outline: none;
+}
+
+.ob-tick-select:hover,
+.ob-tick-select:focus {
+  border-color: rgba(44, 213, 138, 0.45);
+  color: #f8fafc;
 }
 
 .ob-depth-bar {
