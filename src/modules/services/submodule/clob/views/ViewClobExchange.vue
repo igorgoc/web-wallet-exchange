@@ -342,7 +342,7 @@
             <div class="ob-mid-spread">
               <div class="flex items-center gap-2">
                 <span class="mid-price font-mono" :class="lastTradeSide === 'buy' ? 'text-emerald-400' : 'text-rose-400'">
-                  {{ formatCleanPrice(currentPrice) }}
+                  {{ formatCleanPrice(orderBookMidPrice) }}
                 </span>
                 <span class="text-xs font-bold" :class="lastTradeSide === 'buy' ? 'text-emerald-400' : 'text-rose-400'">
                   {{ lastTradeSide === 'buy' ? '↑' : '↓' }}
@@ -952,7 +952,7 @@
             <!-- Mid Price -->
             <div class="flex justify-between items-center px-2 py-1 my-1 bg-slate-800/40 rounded border border-slate-700/40">
               <span class="font-mono text-xs font-bold" :class="lastTradeSide === 'buy' ? 'text-emerald-400' : 'text-rose-400'">
-                {{ formatCleanPrice(currentPrice) }} {{ quoteSymbol }}
+                {{ formatCleanPrice(orderBookMidPrice) }} {{ quoteSymbol }}
               </span>
               <span class="text-[10px] text-slate-400 font-mono">Spread: {{ spreadPct }}%</span>
             </div>
@@ -2095,6 +2095,15 @@ const bestBidPrice = computed(() => {
 
 const bestAskPrice = computed(() => {
   return asks.value.length ? asks.value[0].price : currentPrice.value;
+});
+
+const orderBookMidPrice = computed(() => {
+  if (bids.value.length > 0 && asks.value.length > 0) {
+    return (bids.value[0].price + asks.value[0].price) / 2;
+  }
+  if (bids.value.length > 0) return bids.value[0].price;
+  if (asks.value.length > 0) return asks.value[0].price;
+  return currentPrice.value;
 });
 
 const effectiveOrderPrice = computed(() => {
