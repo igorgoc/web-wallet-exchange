@@ -1978,8 +1978,10 @@ async function claimFaucet() {
     return;
   }
   const pubKey = activeAccount.value?.publicKey;
-  const addr = activeAccount.value?.address;
-  if (!pubKey && !addr) {
+  const targetAddr = (hasSmartTradingAccount.value && tradingAccountAddress.value)
+    ? tradingAccountAddress.value
+    : activeAccount.value?.address;
+  if (!pubKey && !targetAddr) {
     showToast(
       'Wallet Required',
       'Please select or log into your Sirius wallet account before claiming faucet coins.',
@@ -1992,7 +1994,9 @@ async function claimFaucet() {
   isClaimingFaucet.value = true;
   showToast(
     'Requesting Faucet...',
-    'Broadcasting on-chain transfer on Sirius Testnet 2. Please wait for block confirmation...',
+    hasSmartTradingAccount.value
+      ? 'Sending testnet coins directly to your Smart Trading Account on Sirius Testnet 2...'
+      : 'Broadcasting on-chain transfer on Sirius Testnet 2. Please wait for block confirmation...',
     'info',
     4000
   );
@@ -2001,14 +2005,17 @@ async function claimFaucet() {
     const res = await fetch(`${CLOB_API_BASE}/api/clob/faucet`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ publicKey: pubKey, address: addr }),
+      body: JSON.stringify({ publicKey: pubKey, address: targetAddr }),
     });
     const data = await res.json();
     if (data.ok && data.txHash) {
-      await fetchOnChainBalances();
+      await Promise.allSettled([fetchOnChainBalances(), fetchTradingAccountStatus()]);
+      const destLabel = data.deliveredToTradingAccount || hasSmartTradingAccount.value
+        ? `your Trading Account (${data.recipient || targetAddr})`
+        : `${data.recipient || targetAddr}`;
       showToast(
         'On-Chain Faucet Delivered!',
-        `+${data.amountXpx || 10} XPX, +${data.amountUsdt || 50} USDT & +${data.amountBnb || 0.05} BNB sent to ${data.recipient || addr} on Sirius Testnet 2!\nTx: ${data.txHash.slice(0, 16)}...`,
+        `+${data.amountXpx || 50} XPX, +${data.amountUsdt || 100} USDT & +${data.amountBnb || 0.1} BNB sent to ${destLabel} on Sirius Testnet 2! Ready to trade once confirmed (~15s).`,
         'success',
         7000,
         data.txHash
@@ -2017,10 +2024,12 @@ async function claimFaucet() {
       let pollCount = 0;
       const faucetPoller = setInterval(async () => {
         pollCount++;
-        await fetchOnChainBalances();
-        if (pollCount >= 10) {
-          clearInterval(faucetPoller);
-        }
+        try {
+          await Promise.allSettled([fetchOnChainBalances(), fetchTradingAccountStatus()]);
+          if (pollCount >= 10) {
+            clearInterval(faucetPoller);
+          }
+        } catch (_) {}
       }, 2500);
       return;
     } else {
