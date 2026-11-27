@@ -115,6 +115,15 @@
             + Top Up
           </button>
           <button
+            v-if="settlementsNeedingMySignature.length > 0"
+            type="button"
+            class="header-action-pill bg-amber-500/20 border border-amber-400 text-amber-300 hover:bg-amber-500/30 animate-pulse"
+            @click="focusOpenOrdersAndSign"
+            title="You have matched CLOB order(s) waiting for your settlement signature"
+          >
+            ⚠ Sign Order ({{ settlementsNeedingMySignature.length }})
+          </button>
+          <button
             type="button"
             class="header-action-pill pill-withdraw"
             @click="openWithdrawModal"
@@ -186,6 +195,18 @@
                 @click="activeTab = 'orders'"
               >
                 Open Orders ({{ myOpenOrders.length }})
+                <span
+                  v-if="settlementsNeedingMySignature.length > 0"
+                  class="ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500 text-slate-950"
+                >
+                  {{ settlementsNeedingMySignature.length }} to sign
+                </span>
+                <span
+                  v-else-if="settlementsWaitingCounterparty.length > 0"
+                  class="ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-sky-500/25 text-sky-300 border border-sky-400/40"
+                >
+                  {{ settlementsWaitingCounterparty.length }} awaiting 2nd sig
+                </span>
               </button>
               <button 
                 class="tab-btn" 
@@ -208,19 +229,112 @@
           <div class="tab-content">
             <!-- Open Orders Table -->
             <div v-if="activeTab === 'orders'" class="table-container">
+              <!-- Prominent Action Banner inside Open Orders when User1 needs to sign matched order(s) -->
+              <div
+                v-if="settlementsNeedingMySignature.length > 0"
+                class="mx-2 my-2 px-3 py-2 rounded-lg border border-amber-400/70 bg-amber-500/15 flex flex-wrap items-center justify-between gap-2 text-xs"
+              >
+                <div class="text-amber-200 leading-snug">
+                  <span class="font-extrabold text-amber-300">⚠ Signature Required:</span>
+                  <span v-for="(item, idx) in settlementsNeedingMySignature" :key="item.settlementId">
+                    <span v-if="idx > 0">, </span>
+                    <strong class="font-mono text-white">Order #{{ item.myOrderId || item.orderId }}</strong>
+                    ({{ item.mySide.toUpperCase() }} {{ item.myAmount }} XPX<template v-if="item.myPrice"> @ {{ item.myPrice }} {{ item.quoteSymbol }}</template>)
+                  </span>
+                  — counterparty signed, please sign to complete L1 settlement.
+                </div>
+                <button
+                  type="button"
+                  class="px-3 py-1 rounded bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xs cursor-pointer disabled:opacity-60"
+                  :disabled="isSettlingPending || Boolean(signingSettlementId)"
+                  @click="settlePendingTradesNow"
+                >
+                  {{ isSettlingPending ? 'Signing...' : 'Sign Now' }}
+                </button>
+              </div>
+
               <table class="clob-table">
                 <thead>
                   <tr>
                     <th>Order ID</th>
-                    <th>Type</th>
+                    <th>Type / Pair</th>
                     <th>Side</th>
                     <th>Price ({{ quoteSymbol }})</th>
                     <th>Amount (XPX)</th>
-                    <th>Filled</th>
+                    <th>Filled / Signature</th>
                     <th class="text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody>
+                  <!-- Matched Orders Pending or Recently Signed on Sirius L1 -->
+                  <tr
+                    v-for="s in visibleOrderSettlements"
+                    :key="'settle-' + s.settlementId"
+                    :class="s.needsMySignature ? 'bg-amber-500/10' : (s.waitingForCounterparty ? 'bg-sky-500/5' : 'bg-emerald-500/5')"
+                  >
+                    <td class="font-mono text-slate-200 font-bold">#{{ s.myOrderId || s.orderId }}</td>
+                    <td class="text-xs text-slate-300">{{ s.pair }}</td>
+                    <td :class="s.mySide === 'buy' ? 'text-emerald-400' : 'text-rose-400'" class="font-bold uppercase">
+                      {{ s.mySide }}
+                    </td>
+                    <td class="font-mono">{{ s.myPrice ? formatCleanPrice(parseFloat(s.myPrice)) : '—' }}</td>
+                    <td class="font-mono">{{ s.myAmount }}</td>
+                    <td>
+                      <span
+                        v-if="s.needsMySignature"
+                        class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/25 text-amber-300 border border-amber-400/50"
+                      >
+                        ⚠ Needs your signature ({{ s.signedCount }}/{{ s.requiredCount }})
+                      </span>
+                      <span
+                        v-else-if="s.waitingForCounterparty"
+                        class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-sky-500/20 text-sky-300 border border-sky-400/40"
+                      >
+                        ⏳ Signed by you only ({{ s.signedCount }}/{{ s.requiredCount }}) — waiting for counterparty
+                      </span>
+                      <span
+                        v-else-if="s.allPartiesSigned && s.status === 'confirmed'"
+                        class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/40"
+                      >
+                        ✓ Signed by both users ({{ s.signedCount }}/{{ s.requiredCount }}) · Confirmed on L1
+                      </span>
+                      <span
+                        v-else-if="s.allPartiesSigned"
+                        class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/40"
+                      >
+                        ✓ Signed by both users ({{ s.signedCount }}/{{ s.requiredCount }}) · Settling on L1...
+                      </span>
+                      <span
+                        v-else
+                        class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-700/60 text-slate-300"
+                      >
+                        {{ s.status }}
+                      </span>
+                    </td>
+                    <td class="text-right">
+                      <button
+                        v-if="s.needsMySignature"
+                        type="button"
+                        class="px-2.5 py-1 rounded bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-[11px] cursor-pointer disabled:opacity-60"
+                        :disabled="signingSettlementId === s.settlementId || isSettlingPending"
+                        @click="signSpecificSettlement(s.settlementId)"
+                      >
+                        {{ signingSettlementId === s.settlementId ? 'Signing...' : 'Sign Order' }}
+                      </button>
+                      <a
+                        v-else-if="s.txHash && s.allPartiesSigned"
+                        :href="`${explorerBaseUrl}/${s.txHash}`"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="text-[11px] font-mono text-sky-400 hover:text-sky-300 underline"
+                      >
+                        Explorer ↗
+                      </a>
+                      <span v-else class="text-[11px] text-slate-400">Awaiting</span>
+                    </td>
+                  </tr>
+
+                  <!-- Resting Open Orders on Book -->
                   <tr v-for="order in myOpenOrders" :key="order.id">
                     <td class="font-mono text-slate-400">#{{ order.id }}</td>
                     <td>{{ order.type || 'Limit' }}</td>
@@ -234,7 +348,7 @@
                       <button class="cancel-btn" @click="cancelOrder(order.id)">Cancel</button>
                     </td>
                   </tr>
-                  <tr v-if="myOpenOrders.length === 0">
+                  <tr v-if="myOpenOrders.length === 0 && visibleOrderSettlements.length === 0">
                     <td colspan="7" class="empty-state">No open orders</td>
                   </tr>
                 </tbody>
@@ -974,10 +1088,41 @@
         <!-- Collapsible Open Orders Drawer at bottom of Trade Tab -->
         <div class="mobile-open-orders-card mt-3">
           <div class="flex justify-between items-center px-3 py-2 border-b border-[#14221c]">
-            <span class="text-xs font-bold text-slate-200">Open Orders ({{ myOpenOrders.length }})</span>
-            <button type="button" class="text-xs text-emerald-400 hover:underline" @click="mobileTradeTab = 'orders'">
-              View All ({{ myOpenOrders.length }}) →
+            <span class="text-xs font-bold text-slate-200">
+              Open Orders ({{ myOpenOrders.length }})
+              <span
+                v-if="settlementsNeedingMySignature.length > 0"
+                class="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-400 text-slate-950"
+              >
+                {{ settlementsNeedingMySignature.length }} to sign
+              </span>
+            </span>
+            <button type="button" class="text-xs text-emerald-400 hover:underline" @click="mobileTradeTab = 'orders'; activeTab = 'orders'">
+              View All ({{ myOpenOrders.length + visibleOrderSettlements.length }}) →
             </button>
+          </div>
+          <div v-if="visibleOrderSettlements.length > 0" class="divide-y divide-slate-800/40">
+            <div v-for="s in visibleOrderSettlements.slice(0, 2)" :key="'m-mini-' + s.settlementId" class="px-3 py-2 flex justify-between items-center gap-2 text-xs">
+              <div class="min-w-0">
+                <span class="font-mono font-bold text-slate-200">#{{ s.myOrderId || s.orderId }}</span>
+                <span :class="s.mySide === 'buy' ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'" class="ml-1 uppercase">{{ s.mySide }}</span>
+                <span class="ml-1 text-slate-200 font-mono">{{ s.myAmount }} XPX</span>
+                <div class="text-[10px] mt-0.5" :class="s.needsMySignature ? 'text-amber-300 font-bold' : (s.allPartiesSigned ? 'text-emerald-300 font-bold' : 'text-sky-300')">
+                  <template v-if="s.needsMySignature">⚠ Needs your signature ({{ s.signedCount }}/{{ s.requiredCount }})</template>
+                  <template v-else-if="s.waitingForCounterparty">⏳ Signed by you only ({{ s.signedCount }}/{{ s.requiredCount }}) — waiting counterparty</template>
+                  <template v-else-if="s.allPartiesSigned">✓ Signed by both users ({{ s.signedCount }}/{{ s.requiredCount }})</template>
+                </div>
+              </div>
+              <button
+                v-if="s.needsMySignature"
+                type="button"
+                class="px-2.5 py-1 rounded bg-amber-400 text-slate-950 font-extrabold text-[10px] flex-shrink-0"
+                :disabled="signingSettlementId === s.settlementId"
+                @click="signSpecificSettlement(s.settlementId)"
+              >
+                Sign
+              </button>
+            </div>
           </div>
           <div v-if="myOpenOrders.length > 0" class="divide-y divide-slate-800/40">
             <div v-for="order in myOpenOrders.slice(0, 2)" :key="order.id" class="px-3 py-2 flex justify-between items-center text-xs">
@@ -989,7 +1134,7 @@
               <button type="button" class="cancel-btn text-[10px] py-1 px-3" @click="cancelOrder(order.id)">Cancel</button>
             </div>
           </div>
-          <div v-else class="text-center py-3 text-xs text-slate-500">
+          <div v-if="myOpenOrders.length === 0 && visibleOrderSettlements.length === 0" class="text-center py-3 text-xs text-slate-500">
             No open orders
           </div>
         </div>
@@ -1087,10 +1232,70 @@
           <div class="tab-content">
             <!-- Open Orders Cards -->
             <div v-if="activeTab === 'orders'" class="table-container">
-              <div v-if="myOpenOrders.length === 0" class="empty-state py-12">
+              <div v-if="myOpenOrders.length === 0 && visibleOrderSettlements.length === 0" class="empty-state py-12">
                 <p class="text-slate-400">No open orders</p>
               </div>
               <div v-else class="mobile-order-cards">
+                <!-- Matched Settlement Signature Cards -->
+                <div
+                  v-for="s in visibleOrderSettlements"
+                  :key="'m-settle-' + s.settlementId"
+                  class="mobile-order-card"
+                  :class="s.needsMySignature ? 'border-amber-400/60' : (s.allPartiesSigned ? 'border-emerald-400/40' : 'border-sky-400/40')"
+                >
+                  <div class="mobile-order-card-header">
+                    <span :class="s.mySide === 'buy' ? 'text-emerald-400' : 'text-rose-400'" class="font-bold text-sm uppercase">
+                      {{ s.mySide }} {{ s.pair }}
+                    </span>
+                    <span class="text-slate-300 text-xs font-mono font-bold">#{{ s.myOrderId || s.orderId }}</span>
+                  </div>
+                  <div class="mobile-order-card-body">
+                    <div class="mobile-order-field">
+                      <span class="field-lbl">Price</span>
+                      <span class="field-val font-mono">{{ s.myPrice ? formatCleanPrice(parseFloat(s.myPrice)) : '—' }}</span>
+                    </div>
+                    <div class="mobile-order-field">
+                      <span class="field-lbl">Amount</span>
+                      <span class="field-val font-mono">{{ s.myAmount }} XPX</span>
+                    </div>
+                  </div>
+                  <div class="mt-2 text-xs font-bold">
+                    <span v-if="s.needsMySignature" class="text-amber-300">
+                      ⚠ Needs your signature ({{ s.signedCount }}/{{ s.requiredCount }})
+                    </span>
+                    <span v-else-if="s.waitingForCounterparty" class="text-sky-300">
+                      ⏳ Signed by you only ({{ s.signedCount }}/{{ s.requiredCount }}) — waiting for counterparty
+                    </span>
+                    <span v-else-if="s.allPartiesSigned && s.status === 'confirmed'" class="text-emerald-300">
+                      ✓ Signed by both users ({{ s.signedCount }}/{{ s.requiredCount }}) · Confirmed on L1
+                    </span>
+                    <span v-else-if="s.allPartiesSigned" class="text-emerald-300">
+                      ✓ Signed by both users ({{ s.signedCount }}/{{ s.requiredCount }}) · Settling on L1...
+                    </span>
+                  </div>
+                  <div v-if="s.needsMySignature || (s.txHash && s.allPartiesSigned)" class="mobile-order-card-footer mt-2">
+                    <button
+                      v-if="s.needsMySignature"
+                      type="button"
+                      class="w-full py-2 rounded-lg bg-amber-400 text-slate-950 font-extrabold text-xs"
+                      :disabled="signingSettlementId === s.settlementId || isSettlingPending"
+                      @click="signSpecificSettlement(s.settlementId)"
+                    >
+                      {{ signingSettlementId === s.settlementId ? 'Signing...' : 'Sign Order Now' }}
+                    </button>
+                    <a
+                      v-else-if="s.txHash"
+                      :href="`${explorerBaseUrl}/${s.txHash}`"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="text-xs font-mono text-sky-400 underline"
+                    >
+                      View on Sirius Explorer ↗
+                    </a>
+                  </div>
+                </div>
+
+                <!-- Resting Open Orders Cards -->
                 <div v-for="order in myOpenOrders" :key="order.id" class="mobile-order-card">
                   <div class="mobile-order-card-header">
                     <span :class="order.side === 'Buy' ? 'text-emerald-400' : 'text-rose-400'" class="font-bold text-sm">
@@ -1391,7 +1596,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import { walletState } from '@/state/walletState';
 import { networkState } from '@/state/networkState';
 import {
@@ -1440,6 +1645,7 @@ const getClobApiBase = () => {
 };
 const CLOB_API_BASE = getClobApiBase();
 const router = useRouter();
+const route = useRoute();
 
 const isWalletLoggedIn = computed(() => {
   return Boolean(walletState.isLogin || walletState.currentLoggedInWallet);
@@ -2441,6 +2647,15 @@ function unlockTradingSession() {
     } else if (pendingAction.value === 'settlePending') {
       pendingAction.value = null;
       settlePendingTradesNow();
+    } else if (pendingAction.value === 'signOneSettlement') {
+      const targetId = pendingSignSettlementId.value;
+      pendingAction.value = null;
+      pendingSignSettlementId.value = null;
+      if (targetId) {
+        signSpecificSettlement(targetId);
+      } else {
+        settlePendingTradesNow();
+      }
     }
     if (hasSmartTradingAccount.value) {
       cosignAllPendingSettlements().catch(() => {});
@@ -2467,6 +2682,232 @@ const shownSettlementToastIds = new Set<string>();
 const recentSignedOrders = new Map<string, { pair: string; side: 'buy' | 'sell'; price: string; amount: string }>();
 // Cumulative outflow tracker per signed order fingerprint (blocks partial-fill split over-spend attacks)
 const cumulativeOrderOutflows = new Map<string, { outXpx: bigint; outQuote: bigint; settlementIds: Set<string> }>();
+
+interface SettlementSignatureSummary {
+  settlementId: string;
+  orderId: string;
+  myOrderId: string;
+  role: string;
+  pair: string;
+  quoteSymbol: string;
+  mySide: string;
+  myPrice: string;
+  myAmount: string;
+  status: string;
+  txHash?: string | null;
+  requiredCount: number;
+  signedCount: number;
+  signedByMe: boolean;
+  needsMySignature: boolean;
+  waitingForCounterparty: boolean;
+  allPartiesSigned: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+const pendingSettlements = ref<any[]>([]);
+const recentSettlements = ref<SettlementSignatureSummary[]>([]);
+const signingSettlementId = ref<string | null>(null);
+const pendingSignSettlementId = ref<string | null>(null);
+const lastSeenSettlementStates = new Map<string, { signedCount: number; status: string; allPartiesSigned: boolean }>();
+
+function buildFallbackSummary(s: any, viewerPubKey: string): SettlementSignatureSummary {
+  const viewerLower = String(viewerPubKey || '').toLowerCase();
+  const viewerUpper = viewerLower.toUpperCase();
+  const reqList: string[] = Array.from(
+    new Set((Array.isArray(s.requiredCosigners) ? s.requiredCosigners : []).map((p: any) => String(p || '').toUpperCase()).filter(Boolean))
+  );
+  const signedSet = new Set(
+    (Array.isArray(s.collectedCosigs) ? s.collectedCosigs : []).map((c: any) => String(c?.signer || '').toUpperCase()).filter(Boolean)
+  );
+  const requiredCount = reqList.length;
+  const isDoneOrReady = s.status === 'ready' || s.status === 'broadcast' || s.status === 'confirmed';
+  const signedCount = isDoneOrReady ? requiredCount : reqList.filter((p) => signedSet.has(p)).length;
+  const signedByMe = isDoneOrReady || signedSet.has(viewerUpper);
+  const isRequired = reqList.includes(viewerUpper);
+  const needsMySignature = s.status === 'pending_cosign' && isRequired && !signedByMe;
+  const allPartiesSigned = isDoneOrReady || (requiredCount > 0 && signedCount >= requiredCount);
+  const waitingForCounterparty = s.status === 'pending_cosign' && signedByMe && !allPartiesSigned;
+  const pMap = s.orderContext?.participantContexts;
+  const myCtx = pMap ? (pMap[viewerLower] || pMap[viewerUpper] || null) : null;
+  const baseCtx = s.orderContext || {};
+  const pair = String(myCtx?.pair || baseCtx.pair || 'XPX/USDT');
+  const quoteSymbol = pair.includes('/') ? pair.split('/')[1] : 'USDT';
+  const mySide = String(myCtx?.side || baseCtx.side || 'buy').toLowerCase();
+  return {
+    settlementId: String(s.settlementId || ''),
+    orderId: String(s.orderId || ''),
+    myOrderId: String(myCtx?.orderId || s.orderId || ''),
+    role: String(s.ownerPublicKey || '').toLowerCase() === viewerLower ? 'taker' : 'maker',
+    pair,
+    quoteSymbol,
+    mySide,
+    myPrice: String(myCtx?.price || baseCtx.price || ''),
+    myAmount: String(myCtx?.amount || baseCtx.amount || ''),
+    status: String(s.status || 'pending_cosign'),
+    txHash: s.txHash || null,
+    requiredCount,
+    signedCount,
+    signedByMe,
+    needsMySignature,
+    waitingForCounterparty,
+    allPartiesSigned,
+    createdAt: Number(s.createdAt || Date.now()),
+    updatedAt: Number(s.updatedAt || Date.now()),
+  };
+}
+
+const settlementsNeedingMySignature = computed(() =>
+  recentSettlements.value.filter((s) => s.needsMySignature && s.status === 'pending_cosign')
+);
+
+const settlementsWaitingCounterparty = computed(() =>
+  recentSettlements.value.filter((s) => s.waitingForCounterparty && s.status === 'pending_cosign')
+);
+
+const visibleOrderSettlements = computed(() => {
+  const recentCutoff = Date.now() - 30 * 60 * 1000; // Keep recently completed 2/2 settlements visible for 30 min
+  const filtered = recentSettlements.value.filter((s) => {
+    if (s.status === 'pending_cosign' || s.status === 'ready' || s.status === 'broadcast') return true;
+    if (s.status === 'confirmed' && (s.updatedAt || 0) >= recentCutoff) return true;
+    return false;
+  });
+  return filtered
+    .sort((a, b) => {
+      if (a.needsMySignature !== b.needsMySignature) return a.needsMySignature ? -1 : 1;
+      if (a.waitingForCounterparty !== b.waitingForCounterparty) return a.waitingForCounterparty ? -1 : 1;
+      return (b.updatedAt || 0) - (a.updatedAt || 0);
+    })
+    .slice(0, 10);
+});
+
+const hasActivePendingSettlements = computed(() =>
+  recentSettlements.value.some((s) => s.status === 'pending_cosign' || s.status === 'ready' || s.status === 'broadcast')
+);
+
+async function fetchMySettlements(options: { autoCosign?: boolean } = {}) {
+  const pubKey = activeAccount.value?.publicKey;
+  if (!pubKey) {
+    pendingSettlements.value = [];
+    recentSettlements.value = [];
+    return;
+  }
+  try {
+    const resSettle = await fetch(
+      `${CLOB_API_BASE}/api/clob/trading-account/pending-settlements?ownerPublicKey=${pubKey}`
+    );
+    if (!resSettle.ok) return;
+    const sData = await resSettle.json();
+    if (!sData || !sData.ok) return;
+
+    const activeList = Array.isArray(sData.settlements) ? sData.settlements : [];
+    pendingSettlements.value = activeList;
+
+    const summaries: SettlementSignatureSummary[] = Array.isArray(sData.recentSettlements)
+      ? sData.recentSettlements
+      : activeList.map((s: any) => s.signatureSummary || buildFallbackSummary(s, pubKey));
+
+    // Detect live counterparty signature & L1 confirmation transitions for User2 (and User1)
+    let shouldRefreshBalances = false;
+    for (const curr of summaries) {
+      const prev = lastSeenSettlementStates.get(curr.settlementId);
+      if (prev) {
+        if (!prev.allPartiesSigned && curr.allPartiesSigned) {
+          shouldRefreshBalances = true;
+          showToast(
+            `Order #${curr.myOrderId || curr.orderId} Signed by Both Users!`,
+            `Counterparty signed! Both users have signed (${curr.signedCount}/${curr.requiredCount}). Atomic settlement is now broadcasting to Sirius L1.`,
+            'success',
+            7000,
+            curr.txHash || undefined
+          );
+        } else if (prev.status !== 'confirmed' && curr.status === 'confirmed') {
+          shouldRefreshBalances = true;
+          showToast(
+            `Order #${curr.myOrderId || curr.orderId} Confirmed on Sirius L1!`,
+            `Both users signed (${curr.signedCount}/${curr.requiredCount}) and atomic swap settled on-chain.`,
+            'trade',
+            6000,
+            curr.txHash || undefined
+          );
+        }
+      }
+      lastSeenSettlementStates.set(curr.settlementId, {
+        signedCount: curr.signedCount,
+        status: curr.status,
+        allPartiesSigned: curr.allPartiesSigned,
+      });
+    }
+
+    recentSettlements.value = summaries;
+
+    if (shouldRefreshBalances && hasSmartTradingAccount.value) {
+      fetchTradingAccountStatus().catch(() => {});
+    }
+
+    // Auto-cosign seamlessly if user's trading session is already unlocked in this tab
+    if (options.autoCosign && hasSmartTradingAccount.value && sessionTradingPrivateKey.value) {
+      const myPubUpper = String(pubKey).toUpperCase();
+      for (const s of activeList) {
+        const sKey = getSettlementSignKey(s);
+        const alreadySignedByMe =
+          cosignedSettlementIds.has(sKey) ||
+          (Array.isArray(s.collectedCosigs) &&
+            s.collectedCosigs.some((c: any) => String(c?.signer || '').toUpperCase() === myPubUpper));
+        if (s.status === 'pending_cosign' && !alreadySignedByMe) {
+          cosignVerifiedSettlement(s)
+            .then(() => fetchMySettlements({ autoCosign: false }))
+            .catch(() => {});
+        }
+      }
+    }
+  } catch (_) {}
+}
+
+async function signSpecificSettlement(settlementId: string) {
+  if (signingSettlementId.value || isSettlingPending.value) return;
+  const signer = getSignerAccount();
+  if (!signer) {
+    pendingAction.value = 'signOneSettlement';
+    pendingSignSettlementId.value = settlementId;
+    showPasswordModal.value = true;
+    passwordError.value = '';
+    return;
+  }
+  signingSettlementId.value = settlementId;
+  try {
+    let target = pendingSettlements.value.find((s: any) => s.settlementId === settlementId);
+    if (!target) {
+      await fetchMySettlements({ autoCosign: false });
+      target = pendingSettlements.value.find((s: any) => s.settlementId === settlementId);
+    }
+    if (!target) {
+      showToast('Already Updated', 'This settlement has already been signed or completed.', 'info', 4000);
+      await fetchMySettlements({ autoCosign: false });
+      return;
+    }
+    const result = await cosignVerifiedSettlement(target);
+    await fetchMySettlements({ autoCosign: false });
+    await fetchTradingAccountStatus();
+    if (!result.ok && result.error) {
+      showToast('Signature Failed', result.error, 'error', 7000);
+    }
+  } catch (err: any) {
+    showToast('Signature Error', err?.message || 'Failed to sign order settlement', 'error', 6000);
+  } finally {
+    signingSettlementId.value = null;
+  }
+}
+
+function focusOpenOrdersAndSign() {
+  activeTab.value = 'orders';
+  mobileTradeTab.value = 'orders';
+  if (settlementsNeedingMySignature.value.length === 1) {
+    signSpecificSettlement(settlementsNeedingMySignature.value[0].settlementId);
+  } else {
+    settlePendingTradesNow();
+  }
+}
 
 function hexToUint8(hex: string): Uint8Array {
   const clean = hex.replace(/^0x/i, '');
@@ -3156,6 +3597,7 @@ async function cosignVerifiedSettlement(
           );
         }
       }
+      fetchMySettlements({ autoCosign: false }).catch(() => {});
       return { ok: true, txHash: data.txHash, status: data.status, approvedCount };
     }
     if (!data.ok) {
@@ -4204,7 +4646,11 @@ watch(selectedPair, () => {
 });
 
 watch(() => activeAccount.value?.publicKey, () => {
+  lastSeenSettlementStates.clear();
+  pendingSettlements.value = [];
+  recentSettlements.value = [];
   sendWsSubscribe();
+  fetchMySettlements({ autoCosign: false });
 });
 
 async function syncFromNode() {
@@ -4299,27 +4745,10 @@ async function syncFromNode() {
       applyBalances(balRes.value.data.balances);
     }
 
-    // 7. Auto-cosign pending settlements once Smart Trading Account status is synced
-    if (hasSmartTradingAccount.value && sessionTradingPrivateKey.value && activeAccount.value?.publicKey) {
-      try {
-        const resSettle = await fetch(`${CLOB_API_BASE}/api/clob/trading-account/pending-settlements?ownerPublicKey=${activeAccount.value.publicKey}`);
-        if (resSettle.ok) {
-          const sData = await resSettle.json();
-          if (sData.ok && Array.isArray(sData.settlements)) {
-            const myPubUpper = String(activeAccount.value?.publicKey || '').toUpperCase();
-            for (const s of sData.settlements) {
-              const sKey = getSettlementSignKey(s);
-              const alreadySignedByMe =
-                cosignedSettlementIds.has(sKey) ||
-                (Array.isArray(s.collectedCosigs) &&
-                  s.collectedCosigs.some((c: any) => String(c?.signer || '').toUpperCase() === myPubUpper));
-              if (s.status === 'pending_cosign' && !alreadySignedByMe) {
-                cosignVerifiedSettlement(s).catch(() => {});
-              }
-            }
-          }
-        }
-      } catch (_) {}
+    // 7. Always sync pending & recent settlement signature states (even before password unlock so
+    // User1 immediately sees which order needs signing, and User2 sees live 1/2 -> 2/2 updates!)
+    if (activeAccount.value?.publicKey) {
+      await fetchMySettlements({ autoCosign: true });
     }
   } catch (_) {
     isConnected.value = false;
@@ -4353,22 +4782,49 @@ watch(isChartExpanded, () => {
   });
 });
 
-onMounted(() => {
+onMounted(async () => {
   WalletStateUtils.purgeStorageKeys();
   checkMobile();
   if (typeof window !== 'undefined') {
     window.addEventListener('resize', checkMobile);
   }
+
+  // Handle deep-link from Wallet Home Screen ("Sign Order ->" or "View Open Orders ->")
+  const qPair = String(route.query.pair || '').toUpperCase();
+  if (qPair === 'XPX/BNB' || qPair === 'XPX/USDT') {
+    selectedPair.value = qPair as 'XPX/USDT' | 'XPX/BNB';
+  }
+  const qAction = String(route.query.action || '');
+  const qTab = String(route.query.tab || '');
+  const qSettlementId = String(route.query.settlementId || '');
+  if (qTab === 'orders' || qAction === 'signSettlement') {
+    activeTab.value = 'orders';
+    mobileTradeTab.value = 'orders';
+  }
+
   nextTick(() => {
     initTradingViewChart();
   });
   fetchClobConfig();
-  syncFromNode();
+  await syncFromNode();
+
+  if (qAction === 'signSettlement' && settlementsNeedingMySignature.value.length > 0) {
+    if (qSettlementId) {
+      signSpecificSettlement(qSettlementId);
+    } else {
+      focusOpenOrdersAndSign();
+    }
+  }
+
   wsDisposed = false;
   connectClobWs();
   pollTimer = setInterval(() => {
     pollTickCount++;
-    // When WebSocket is connected, relax fallback REST polling to every 12s (4th tick)
+    // Fast-poll settlements every 3s while awaiting counterparty signature or L1 confirmation
+    if (hasActivePendingSettlements.value && activeAccount.value?.publicKey) {
+      fetchMySettlements({ autoCosign: true });
+    }
+    // When WebSocket is connected, relax full fallback REST polling to every 12s (4th tick)
     if (wsConnected.value && pollTickCount % 4 !== 0) return;
     syncFromNode();
   }, 3000);

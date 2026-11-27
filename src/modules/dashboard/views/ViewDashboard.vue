@@ -118,6 +118,114 @@
             </div>
           </div>
         </div>
+
+        <!-- CLOB DEX Pending Order Signature & Settlement Alert (Home Screen) -->
+        <div
+          v-if="clobSettlementsNeedingMySignature.length > 0"
+          class="mt-3 rounded-lg border-2 border-amber-400 bg-amber-50 px-4 py-3 shadow-md text-left"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="inline-block w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
+                <span class="text-xs font-extrabold uppercase tracking-wide text-amber-900">
+                  DEX Action Required: {{ clobSettlementsNeedingMySignature.length }} Order{{ clobSettlementsNeedingMySignature.length > 1 ? 's' : '' }} Awaiting Your Signature
+                </span>
+              </div>
+              <p class="text-xs text-amber-800 mt-1">
+                Your matched CLOB order{{ clobSettlementsNeedingMySignature.length > 1 ? 's need' : ' needs' }} your co-signature to complete atomic settlement on Sirius L1:
+              </p>
+              <div class="mt-2 space-y-1.5">
+                <div
+                  v-for="item in clobSettlementsNeedingMySignature"
+                  :key="item.settlementId"
+                  class="flex flex-wrap items-center justify-between gap-2 rounded bg-white/90 border border-amber-200 px-3 py-2 text-xs"
+                >
+                  <div class="min-w-0">
+                    <span class="font-mono font-bold text-gray-900">Order #{{ item.myOrderId || item.orderId }}</span>
+                    <span
+                      class="ml-1.5 inline-block px-1.5 py-0.5 rounded font-bold uppercase text-[10px]"
+                      :class="item.mySide === 'buy' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'"
+                    >
+                      {{ item.mySide }}
+                    </span>
+                    <span class="ml-1.5 font-mono font-semibold text-gray-800">{{ item.myAmount }} XPX</span>
+                    <span v-if="item.myPrice" class="ml-1 font-mono text-gray-600">@ {{ item.myPrice }} {{ item.quoteSymbol }}</span>
+                    <span class="ml-1.5 text-[11px] text-gray-500">({{ item.pair }})</span>
+                    <div class="text-[11px] text-amber-700 font-medium mt-0.5">
+                      Signed {{ item.signedCount }}/{{ item.requiredCount }} — Waiting for your signature
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    class="px-3 py-1.5 rounded-md bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs shadow-sm transition-colors cursor-pointer flex-shrink-0"
+                    @click="goToSignClobOrder(item)"
+                  >
+                    Sign Order →
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CLOB DEX Counterparty Signature Status (User2 waiting / both signed) -->
+        <div
+          v-else-if="clobCounterpartyStatusItems.length > 0"
+          class="mt-3 rounded-lg border px-4 py-3 shadow-sm text-left"
+          :class="clobHasOnlyWaitingCounterparty ? 'border-sky-300 bg-sky-50' : 'border-emerald-300 bg-emerald-50'"
+        >
+          <div class="flex items-center justify-between gap-2 mb-1.5">
+            <span
+              class="text-xs font-extrabold uppercase tracking-wide"
+              :class="clobHasOnlyWaitingCounterparty ? 'text-sky-900' : 'text-emerald-900'"
+            >
+              DEX Order Settlement Status
+            </span>
+            <button
+              type="button"
+              class="text-xs font-bold underline cursor-pointer"
+              :class="clobHasOnlyWaitingCounterparty ? 'text-sky-700' : 'text-emerald-700'"
+              @click="router.push({ name: 'ViewServicesClobExchange', query: { tab: 'orders' } })"
+            >
+              View Open Orders →
+            </button>
+          </div>
+          <div class="space-y-1.5">
+            <div
+              v-for="item in clobCounterpartyStatusItems.slice(0, 3)"
+              :key="item.settlementId"
+              class="flex flex-wrap items-center justify-between gap-2 rounded bg-white/90 border px-3 py-1.5 text-xs"
+              :class="item.allPartiesSigned ? 'border-emerald-200' : 'border-sky-200'"
+            >
+              <div>
+                <span class="font-mono font-bold text-gray-900">Order #{{ item.myOrderId || item.orderId }}</span>
+                <span
+                  class="ml-1.5 inline-block px-1.5 py-0.5 rounded font-bold uppercase text-[10px]"
+                  :class="item.mySide === 'buy' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'"
+                >
+                  {{ item.mySide }}
+                </span>
+                <span class="ml-1.5 font-mono text-gray-800">{{ item.myAmount }} XPX</span>
+                <span v-if="item.myPrice" class="ml-1 font-mono text-gray-600">@ {{ item.myPrice }} {{ item.quoteSymbol }}</span>
+              </div>
+              <span
+                class="text-[11px] font-bold px-2 py-0.5 rounded-full"
+                :class="item.allPartiesSigned ? 'bg-emerald-100 text-emerald-800' : 'bg-sky-100 text-sky-800'"
+              >
+                <template v-if="item.allPartiesSigned && item.status === 'confirmed'">
+                  ✓ Signed by both users ({{ item.signedCount }}/{{ item.requiredCount }}) · Confirmed on L1
+                </template>
+                <template v-else-if="item.allPartiesSigned">
+                  ✓ Signed by both users ({{ item.signedCount }}/{{ item.requiredCount }}) · Settling on L1...
+                </template>
+                <template v-else>
+                  Signed by you only ({{ item.signedCount }}/{{ item.requiredCount }}) · Waiting for counterparty
+                </template>
+              </span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -182,7 +290,7 @@
 
 <script setup lang="ts">
 import PendingDataTable from "@/modules/account/components/PendingDataTable.vue";
-import { computed, ref, getCurrentInstance, watch, onMounted } from "vue";
+import { computed, ref, getCurrentInstance, watch, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
 import {
   TransactionFilterTypes,
@@ -684,6 +792,152 @@ const linkToExplorer = () => {
     selectedAccount.value.address
   );
 };
+
+// === CLOB DEX Pending Settlement & Signature Status (Home Screen) ===
+const getClobApiBase = () => {
+  if (typeof window === "undefined") return "";
+  const { hostname } = window.location;
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    return `http://${hostname}:8088`;
+  }
+  return "https://sirius-clob-backend.onrender.com";
+};
+const CLOB_API_BASE = getClobApiBase();
+
+interface ClobSettlementSummary {
+  settlementId: string;
+  orderId: string;
+  myOrderId: string;
+  role: string;
+  pair: string;
+  quoteSymbol: string;
+  mySide: string;
+  myPrice: string;
+  myAmount: string;
+  status: string;
+  txHash?: string | null;
+  requiredCount: number;
+  signedCount: number;
+  signedByMe: boolean;
+  needsMySignature: boolean;
+  waitingForCounterparty: boolean;
+  allPartiesSigned: boolean;
+  createdAt: number;
+  updatedAt: number;
+  accountName?: string;
+}
+
+const clobRecentSettlements = ref<ClobSettlementSummary[]>([]);
+let clobPollTimer: ReturnType<typeof setInterval> | null = null;
+
+const clobSettlementsNeedingMySignature = computed(() =>
+  clobRecentSettlements.value.filter((s) => s.needsMySignature && s.status === "pending_cosign")
+);
+
+const clobCounterpartyStatusItems = computed(() => {
+  const cutoff = Date.now() - 10 * 60 * 1000; // show recently completed 2/2 signatures for 10 min on Home screen
+  return clobRecentSettlements.value.filter(
+    (s) =>
+      s.waitingForCounterparty ||
+      (s.allPartiesSigned &&
+        (s.status === "ready" || s.status === "broadcast" || (s.status === "confirmed" && (s.updatedAt || 0) >= cutoff)))
+  );
+});
+
+const clobHasOnlyWaitingCounterparty = computed(
+  () =>
+    clobCounterpartyStatusItems.value.length > 0 &&
+    clobCounterpartyStatusItems.value.every((s) => !s.allPartiesSigned)
+);
+
+const fetchHomeClobSettlements = async () => {
+  const wallet = walletState.currentLoggedInWallet;
+  if (!wallet) {
+    clobRecentSettlements.value = [];
+    return;
+  }
+  const accs = Array.isArray(wallet.accounts) ? wallet.accounts : [];
+  const pubKeysToCheck: Array<{ publicKey: string; name: string }> = [];
+  const seen = new Set<string>();
+  if (selectedAccount.value?.publicKey) {
+    const pk = String(selectedAccount.value.publicKey).toLowerCase();
+    seen.add(pk);
+    pubKeysToCheck.push({ publicKey: selectedAccount.value.publicKey, name: selectedAccount.value.name || "Account" });
+  }
+  for (const a of accs) {
+    const pk = String(a?.publicKey || "").toLowerCase();
+    if (pk && !seen.has(pk)) {
+      seen.add(pk);
+      pubKeysToCheck.push({ publicKey: a.publicKey, name: a.name || "Account" });
+    }
+  }
+  if (pubKeysToCheck.length === 0) return;
+
+  try {
+    const allItems: ClobSettlementSummary[] = [];
+    const seenIds = new Set<string>();
+    const results = await Promise.allSettled(
+      pubKeysToCheck.map(async (entry) => {
+        const res = await fetch(
+          `${CLOB_API_BASE}/api/clob/trading-account/pending-settlements?ownerPublicKey=${entry.publicKey}`
+        );
+        if (!res.ok) return [];
+        const data = await res.json();
+        if (!data || !data.ok) return [];
+        const list: ClobSettlementSummary[] = Array.isArray(data.recentSettlements)
+          ? data.recentSettlements
+          : Array.isArray(data.settlements)
+          ? data.settlements
+              .map((s: any) => s.signatureSummary)
+              .filter(Boolean)
+          : [];
+        return list.map((item) => ({ ...item, accountName: entry.name }));
+      })
+    );
+    for (const r of results) {
+      if (r.status === "fulfilled" && Array.isArray(r.value)) {
+        for (const item of r.value) {
+          if (item && item.settlementId && !seenIds.has(item.settlementId)) {
+            seenIds.add(item.settlementId);
+            allItems.push(item);
+          }
+        }
+      }
+    }
+    allItems.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    clobRecentSettlements.value = allItems;
+  } catch (_) {}
+};
+
+const goToSignClobOrder = (item: ClobSettlementSummary) => {
+  router.push({
+    name: "ViewServicesClobExchange",
+    query: {
+      action: "signSettlement",
+      pair: item.pair || "XPX/USDT",
+      settlementId: item.settlementId,
+    },
+  });
+};
+
+onMounted(() => {
+  fetchHomeClobSettlements();
+  clobPollTimer = setInterval(fetchHomeClobSettlements, 8000);
+});
+
+onUnmounted(() => {
+  if (clobPollTimer) {
+    clearInterval(clobPollTimer);
+    clobPollTimer = null;
+  }
+});
+
+watch(
+  () => selectedAccount.value?.publicKey,
+  () => {
+    fetchHomeClobSettlements();
+  }
+);
 </script>
 <style lang="scss" scoped>
 .address_div {
