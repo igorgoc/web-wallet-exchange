@@ -117,11 +117,11 @@
           <button
             v-if="settlementsNeedingMySignature.length > 0"
             type="button"
-            class="header-action-pill bg-amber-500/20 border border-amber-400 text-amber-300 hover:bg-amber-500/30 animate-pulse"
+            class="header-action-pill bg-amber-500/20 border border-amber-400 text-amber-300 hover:bg-amber-500/30 animate-pulse !px-2.5 !text-[11px] whitespace-nowrap"
             @click="focusOpenOrdersAndSign"
             title="You have matched CLOB order(s) waiting for your settlement signature"
           >
-            ⚠ Sign Order ({{ settlementsNeedingMySignature.length }})
+            ⚠ Sign ({{ settlementsNeedingMySignature.length }})
           </button>
           <button
             type="button"
@@ -235,7 +235,7 @@
                 class="mx-2 my-2 px-3 py-2 rounded-lg border border-amber-400/70 bg-amber-500/15 flex flex-wrap items-center justify-between gap-2 text-xs"
               >
                 <div class="text-amber-200 leading-snug">
-                  <span class="font-extrabold text-amber-300">⚠ Signature Required:</span>
+                  <span class="font-extrabold text-amber-300">⚠ Signature Required: </span>
                   <span v-for="(item, idx) in settlementsNeedingMySignature" :key="item.settlementId">
                     <span v-if="idx > 0">, </span>
                     <strong class="font-mono text-white">Order #{{ item.myOrderId || item.orderId }}</strong>
