@@ -57,6 +57,7 @@ import { SwapUtils } from "@/util/swapUtils";
 import { networkState } from "@/state/networkState";
 import { walletState } from "@/state/walletState";
 import { ChainSwapConfig } from "@/models/stores/chainSwapConfig";
+import { getClobApiBase } from "@/modules/services/submodule/clob/clobConfig";
 import { useI18n } from 'vue-i18n';
 export default {
     name: "ViewServicesMainnetSwap",
@@ -75,25 +76,17 @@ export default {
         }
       };
 
-    const getSwapApiBase = () => {
-      if (typeof window === 'undefined') return 'https://sirius-clob-backend.onrender.com';
-      const hostname = window.location.hostname || '127.0.0.1';
-      if (hostname === 'localhost' || hostname === '127.0.0.1') {
-        return `http://${hostname}:8088`;
-      }
-      return 'https://sirius-clob-backend.onrender.com';
-    };
+    const isMainnet = (networkState.currentNetworkProfile?.network?.type === 184) || (walletState.currentLoggedInWallet?.accounts?.[0]?.address?.startsWith('X'));
+    const swapApiBase = getClobApiBase(isMainnet ? 184 : 168);
 
     let swapData = new ChainSwapConfig(networkState.chainNetworkName);
     swapData.init();
-    const swapApiBase = getSwapApiBase();
-    if (!swapData.swap_XPX_BSC_URL || swapData.swap_XPX_BSC_URL.includes('xpxsirius.io') || swapData.swap_XPX_BSC_URL.includes('127.0.0.1') || swapData.swap_XPX_BSC_URL.includes('localhost')) {
+    if (swapApiBase && (!swapData.swap_XPX_BSC_URL || swapData.swap_XPX_BSC_URL.includes('xpxsirius.io') || swapData.swap_XPX_BSC_URL.includes('127.0.0.1') || swapData.swap_XPX_BSC_URL.includes('localhost'))) {
       swapData.swap_XPX_BSC_URL = `${swapApiBase}/api/swap/bsc`;
       swapData.swap_IN_SERVICE_URL = `${swapApiBase}/api/swap/sirius`;
       swapData.swap_SERVICE_URL = `${swapApiBase}/api/swap`;
       swapData.priceConsultURL = `${swapApiBase}/api/swap`;
       swapData.gasPriceConsultURL = `${swapApiBase}/api/swap/gas`;
-      const isMainnet = (networkState.currentNetworkProfile?.network?.type === 184) || (walletState.currentLoggedInWallet?.accounts?.[0]?.address?.startsWith('X'));
       if (isMainnet) {
         swapData.BSCChainId = 56;
         swapData.BSCNetworkName = 'BNB Smart Chain Mainnet';

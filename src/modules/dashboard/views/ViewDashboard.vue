@@ -154,6 +154,9 @@
                     <span class="ml-1.5 text-[11px] text-gray-500">({{ item.pair }})</span>
                     <div class="text-[11px] text-amber-700 font-medium mt-0.5">
                       Signed {{ item.signedCount }}/{{ item.requiredCount }} — Waiting for your signature
+                      <span v-if="item.expiresAtMs" class="ml-1 text-amber-800/80 font-mono">
+                        (Expires in {{ formatSettlementCountdown(item.expiresAtMs, clobCountdownNowMs) }})
+                      </span>
                     </div>
                   </div>
                   <button
@@ -220,7 +223,7 @@
                   ✓ Signed by both users ({{ item.signedCount }}/{{ item.requiredCount }}) · Settling on L1...
                 </template>
                 <template v-else>
-                  Signed by you only ({{ item.signedCount }}/{{ item.requiredCount }}) · Waiting for counterparty
+                  Signed by you only ({{ item.signedCount }}/{{ item.requiredCount }}) · Waiting for counterparty<template v-if="item.expiresAtMs"> · {{ formatSettlementCountdown(item.expiresAtMs, clobCountdownNowMs) }}</template>
                 </template>
               </span>
             </div>
@@ -312,6 +315,10 @@ import { AppState } from "@/state/appState";
 import { useI18n } from "vue-i18n";
 import {  NetworkType, TransactionMapping } from "tsjs-xpx-chain-sdk";
 import { TransactionUtils } from "@/util/transactionUtils";
+import {
+  getClobApiBase,
+  formatSettlementCountdown,
+} from "@/modules/services/submodule/clob/clobConfig";
 
 
 const { t } = useI18n();
@@ -794,15 +801,9 @@ const linkToExplorer = () => {
 };
 
 // === CLOB DEX Pending Settlement & Signature Status (Home Screen) ===
-const getClobApiBase = () => {
-  if (typeof window === "undefined") return "";
-  const { hostname } = window.location;
-  if (hostname === "localhost" || hostname === "127.0.0.1") {
-    return `http://${hostname}:8088`;
-  }
-  return "https://sirius-clob-backend.onrender.com";
-};
-const CLOB_API_BASE = getClobApiBase();
+const clobApiBase = computed(() =>
+  getClobApiBase(AppState.networkType || networkState.currentNetworkProfile?.network?.type, selectedAccount.value?.address)
+);
 
 interface ClobSettlementSummary {
   settlementId: string;
@@ -824,11 +825,14 @@ interface ClobSettlementSummary {
   allPartiesSigned: boolean;
   createdAt: number;
   updatedAt: number;
+  expiresAtMs?: number;
   accountName?: string;
 }
 
 const clobRecentSettlements = ref<ClobSettlementSummary[]>([]);
+const clobCountdownNowMs = ref<number>(Date.now());
 let clobPollTimer: ReturnType<typeof setInterval> | null = null;
+let clobCountdownTimer: ReturnType<typeof setInterval> | null = null;
 
 const clobSettlementsNeedingMySignature = computed(() =>
   clobRecentSettlements.value.filter((s) => s.needsMySignature && s.status === "pending_cosign")
@@ -852,7 +856,8 @@ const clobHasOnlyWaitingCounterparty = computed(
 
 const fetchHomeClobSettlements = async () => {
   const wallet = walletState.currentLoggedInWallet;
-  if (!wallet) {
+  const apiBase = clobApiBase.value;
+  if (!wallet || !apiBase) {
     clobRecentSettlements.value = [];
     return;
   }
@@ -879,7 +884,7 @@ const fetchHomeClobSettlements = async () => {
     const results = await Promise.allSettled(
       pubKeysToCheck.map(async (entry) => {
         const res = await fetch(
-          `${CLOB_API_BASE}/api/clob/trading-account/pending-settlements?ownerPublicKey=${entry.publicKey}`
+          `${apiBase}/api/clob/trading-account/pending-settlements?ownerPublicKey=${entry.publicKey}`
         );
         if (!res.ok) return [];
         const data = await res.json();
@@ -923,6 +928,11 @@ const goToSignClobOrder = (item: ClobSettlementSummary) => {
 onMounted(() => {
   fetchHomeClobSettlements();
   clobPollTimer = setInterval(fetchHomeClobSettlements, 8000);
+  clobCountdownTimer = setInterval(() => {
+    if (clobSettlementsNeedingMySignature.value.length > 0 || clobCounterpartyStatusItems.value.length > 0) {
+      clobCountdownNowMs.value = Date.now();
+    }
+  }, 15000);
 });
 
 onUnmounted(() => {
@@ -930,10 +940,14 @@ onUnmounted(() => {
     clearInterval(clobPollTimer);
     clobPollTimer = null;
   }
+  if (clobCountdownTimer) {
+    clearInterval(clobCountdownTimer);
+    clobCountdownTimer = null;
+  }
 });
 
 watch(
-  () => selectedAccount.value?.publicKey,
+  [() => selectedAccount.value?.publicKey, clobApiBase],
   () => {
     fetchHomeClobSettlements();
   }

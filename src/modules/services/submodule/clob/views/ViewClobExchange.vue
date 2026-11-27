@@ -153,6 +153,17 @@
       </div>
     </header>
 
+    <!-- Fail-Closed Mainnet Endpoint Notice (prevents Mainnet X... wallets from ever hitting Testnet 2) -->
+    <div
+      v-if="!isClobEndpointReady"
+      class="mx-1 mt-1 mb-1 px-4 py-2.5 rounded-lg border border-amber-400/70 bg-amber-500/15 text-amber-200 text-xs flex items-center justify-between gap-3"
+    >
+      <div>
+        <strong class="text-amber-300">Sirius Mainnet CLOB Gateway Not Yet Configured:</strong>
+        Your Mainnet wallet is protected by our fail-closed network guard and will never connect to Testnet 2. Configure <code>VITE_CLOB_MAINNET_API_URL</code> (HTTPS) once your Mainnet gateway domain is live.
+      </div>
+    </div>
+
     <!-- Main Trading Grid (Desktop 3-Column Workstation) -->
     <main class="clob-grid" v-if="!isMobile">
       <!-- Center-Left Column: Chart + Compact Bottom Panel -->
@@ -284,13 +295,13 @@
                         v-if="s.needsMySignature"
                         class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/25 text-amber-300 border border-amber-400/50"
                       >
-                        ⚠ Needs your signature ({{ s.signedCount }}/{{ s.requiredCount }})
+                        ⚠ Needs your signature ({{ s.signedCount }}/{{ s.requiredCount }})<template v-if="s.expiresAtMs"> · {{ formatSettlementCountdown(s.expiresAtMs, countdownNowMs) }}</template>
                       </span>
                       <span
                         v-else-if="s.waitingForCounterparty"
                         class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-sky-500/20 text-sky-300 border border-sky-400/40"
                       >
-                        ⏳ Signed by you only ({{ s.signedCount }}/{{ s.requiredCount }}) — waiting for counterparty
+                        ⏳ Signed by you only ({{ s.signedCount }}/{{ s.requiredCount }}) — waiting for counterparty<template v-if="s.expiresAtMs"> · {{ formatSettlementCountdown(s.expiresAtMs, countdownNowMs) }}</template>
                       </span>
                       <span
                         v-else-if="s.allPartiesSigned && s.status === 'confirmed'"
@@ -1261,10 +1272,10 @@
                   </div>
                   <div class="mt-2 text-xs font-bold">
                     <span v-if="s.needsMySignature" class="text-amber-300">
-                      ⚠ Needs your signature ({{ s.signedCount }}/{{ s.requiredCount }})
+                      ⚠ Needs your signature ({{ s.signedCount }}/{{ s.requiredCount }})<template v-if="s.expiresAtMs"> · {{ formatSettlementCountdown(s.expiresAtMs, countdownNowMs) }}</template>
                     </span>
                     <span v-else-if="s.waitingForCounterparty" class="text-sky-300">
-                      ⏳ Signed by you only ({{ s.signedCount }}/{{ s.requiredCount }}) — waiting for counterparty
+                      ⏳ Signed by you only ({{ s.signedCount }}/{{ s.requiredCount }}) — waiting for counterparty<template v-if="s.expiresAtMs"> · {{ formatSettlementCountdown(s.expiresAtMs, countdownNowMs) }}</template>
                     </span>
                     <span v-else-if="s.allPartiesSigned && s.status === 'confirmed'" class="text-emerald-300">
                       ✓ Signed by both users ({{ s.signedCount }}/{{ s.requiredCount }}) · Confirmed on L1
@@ -1399,7 +1410,7 @@
       :visible="showTradingSetupModal"
       :activeAccount="activeAccount"
       :validatorCluster="validatorClusterInfo"
-      :clobApiBase="CLOB_API_BASE"
+      :clobApiBase="clobApiBase"
       :networkType="getActiveNetworkId()"
       :generationHash="getActiveGenerationHash()"
       :sessionKey="sessionTradingPrivateKey"
@@ -1621,6 +1632,11 @@ import { WalletUtils } from '@/util/walletUtils';
 import { WalletStateUtils } from '@/state/utils/walletStateUtils';
 import TradingAccountSetupModal from '../components/TradingAccountSetupModal.vue';
 import {
+  getClobApiBase,
+  getClobWsBase,
+  formatSettlementCountdown,
+} from '../clobConfig';
+import {
   createChart,
   ColorType,
   CrosshairMode,
@@ -1634,18 +1650,30 @@ import {
   type MouseEventParams,
 } from 'lightweight-charts';
 
-// --- Testnet 2 & Mainnet Multi-Chain Relayer Constants ---
-const getClobApiBase = () => {
-  if (typeof window === 'undefined') return '';
-  const { hostname } = window.location;
-  if (hostname === 'localhost' || hostname === '127.0.0.1') {
-    return `http://${hostname}:8088`;
-  }
-  return 'https://sirius-clob-backend.onrender.com';
-};
-const CLOB_API_BASE = getClobApiBase();
+// --- Testnet 2 & Mainnet Multi-Chain Relayer Constants (Reactive & Fail-Closed on Mainnet) ---
+const clobApiBase = computed(() => getClobApiBase(getActiveNetworkId(), activeAccount.value?.address));
+const isClobEndpointReady = computed(() => Boolean(clobApiBase.value));
 const router = useRouter();
 const route = useRoute();
+
+// Hoisted Node Sync & WebSocket state (must precede all watchers to prevent TDZ errors)
+const tradeTimestampMap = new Map<string, string>();
+let pollTimer: any = null;
+let pollTickCount = 0;
+let activationPollTimer: any = null;
+let topUpPollTimer: any = null;
+let countdownTimer: any = null;
+const countdownNowMs = ref<number>(Date.now());
+let syncInFlight = false;
+let syncGeneration = 0;
+let lastDepthSig = '';
+let lastTradesSig = '';
+let lastOpenOrdersSig = '';
+const wsConnected = ref<boolean>(false);
+let clobWs: WebSocket | null = null;
+let wsReconnectTimer: any = null;
+let wsReconnectAttempts = 0;
+let wsDisposed = false;
 
 const isWalletLoggedIn = computed(() => {
   return Boolean(walletState.isLogin || walletState.currentLoggedInWallet);
@@ -1972,22 +2000,24 @@ async function fetchOnChainBalances() {
   const rawAddr = activeAccount.value.address.replace(/[- ]/g, '').toUpperCase();
 
   // 1. Primary: High-speed zero-CORS failover endpoint from CLOB gateway
-  try {
-    const res = await fetch(`${CLOB_API_BASE}/api/clob/account/onchain-balance?address=${rawAddr}`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.ok && data.balances) {
-        onChainXpx.value = Number(data.balances.xpx || 0);
-        onChainUsdt.value = Number(data.balances.usdt || 0);
-        onChainBnb.value = Number(data.balances.bnb || 0);
-        isOnChainFetched.value = true;
-        if (activeAccount.value && onChainXpx.value > 0) {
-          (activeAccount.value as any).balance = onChainXpx.value;
+  if (clobApiBase.value) {
+    try {
+      const res = await fetch(`${clobApiBase.value}/api/clob/account/onchain-balance?address=${rawAddr}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ok && data.balances) {
+          onChainXpx.value = Number(data.balances.xpx || 0);
+          onChainUsdt.value = Number(data.balances.usdt || 0);
+          onChainBnb.value = Number(data.balances.bnb || 0);
+          isOnChainFetched.value = true;
+          if (activeAccount.value && onChainXpx.value > 0) {
+            (activeAccount.value as any).balance = onChainXpx.value;
+          }
+          return;
         }
-        return;
       }
-    }
-  } catch (_) {}
+    } catch (_) {}
+  }
 
   // 2. Direct fallback to Sirius Testnet 2 / Mainnet REST Node
   try {
@@ -2055,7 +2085,7 @@ async function fetchOnChainBalances() {
 
 watch(
   () => [activeAccount.value?.publicKey, activeAccount.value?.address],
-  ([newKey, newAddr]) => {
+  ([newKey, newAddr], prev) => {
     if (newKey || newAddr) {
       const rawAddr = (newAddr || '').replace(/[- ]/g, '').toUpperCase();
       const existingOwnerAddr = normalizeAddrStr(tradingAccountInfo.value?.tradingAccount?.ownerAddress);
@@ -2086,9 +2116,12 @@ watch(
       }
       onChainUsdt.value = 0;
       onChainBnb.value = 0;
-      fetchOnChainBalances();
-      fetchTradingAccountStatus();
-      syncFromNode();
+      // Avoid duplicate initial fetches during setup() — onMounted() executes initial syncFromNode() cleanly
+      if (prev !== undefined) {
+        fetchOnChainBalances();
+        fetchTradingAccountStatus();
+        syncFromNode();
+      }
     }
   },
   { immediate: true }
@@ -2208,7 +2241,7 @@ async function claimFaucet() {
   );
 
   try {
-    const res = await fetch(`${CLOB_API_BASE}/api/clob/faucet`, {
+    const res = await fetch(`${clobApiBase.value}/api/clob/faucet`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ publicKey: pubKey, address: targetAddr }),
@@ -2703,6 +2736,7 @@ interface SettlementSignatureSummary {
   allPartiesSigned: boolean;
   createdAt: number;
   updatedAt: number;
+  expiresAtMs?: number;
 }
 
 const pendingSettlements = ref<any[]>([]);
@@ -2787,14 +2821,14 @@ const hasActivePendingSettlements = computed(() =>
 
 async function fetchMySettlements(options: { autoCosign?: boolean } = {}) {
   const pubKey = activeAccount.value?.publicKey;
-  if (!pubKey) {
+  if (!pubKey || !clobApiBase.value) {
     pendingSettlements.value = [];
     recentSettlements.value = [];
     return;
   }
   try {
     const resSettle = await fetch(
-      `${CLOB_API_BASE}/api/clob/trading-account/pending-settlements?ownerPublicKey=${pubKey}`
+      `${clobApiBase.value}/api/clob/trading-account/pending-settlements?ownerPublicKey=${pubKey}`
     );
     if (!resSettle.ok) return;
     const sData = await resSettle.json();
@@ -3019,11 +3053,12 @@ function writeCachedTradingAccountInfo(rawAddr: string, data: any) {
 async function fetchTradingAccountStatus() {
   const queryAcc = activeAccount.value || selectedWalletAccount.value;
   if (!queryAcc?.publicKey && !queryAcc?.address) return;
+  if (!clobApiBase.value) return;
   try {
     const qParam = queryAcc.publicKey
       ? `ownerPublicKey=${queryAcc.publicKey}`
       : `ownerAddress=${queryAcc.address}`;
-    const res = await fetch(`${CLOB_API_BASE}/api/clob/trading-account/status?${qParam}`);
+    const res = await fetch(`${clobApiBase.value}/api/clob/trading-account/status?${qParam}`);
     if (res.ok) {
       const data = await res.json();
       if (data.ok) {
@@ -3162,12 +3197,13 @@ async function cosignAllPendingSettlements(): Promise<{ signedCount: number; err
   if (!hasSmartTradingAccount.value || !activeAccount.value?.publicKey) {
     return { signedCount: 0, errors: [] };
   }
+  if (!clobApiBase.value) return { signedCount: 0, errors: ['CLOB Gateway endpoint is not configured for this network.'] };
   const signer = getSignerAccount();
   if (!signer) return { signedCount: 0, errors: ['Wallet unlock required to cosign settlement.'] };
   let signedCount = 0;
   const errors: string[] = [];
   const resSettle = await fetch(
-    `${CLOB_API_BASE}/api/clob/trading-account/pending-settlements?ownerPublicKey=${activeAccount.value.publicKey}`
+    `${clobApiBase.value}/api/clob/trading-account/pending-settlements?ownerPublicKey=${activeAccount.value.publicKey}`
   );
   if (resSettle.ok) {
     const sData = await resSettle.json();
@@ -3547,7 +3583,10 @@ async function cosignVerifiedSettlement(
       settlement.aggregatePayload,
       genHash
     );
-    const res = await fetch(`${CLOB_API_BASE}/api/clob/trading-account/cosign-settlement`, {
+    if (!clobApiBase.value) {
+      return { ok: false, error: 'CLOB Gateway endpoint is not configured for this network.' };
+    }
+    const res = await fetch(`${clobApiBase.value}/api/clob/trading-account/cosign-settlement`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -3728,7 +3767,7 @@ async function executeWithdraw() {
       // User signs as outer initiator (satisfies Cosigner 1 of the 2-of-2 Trading Account)
       const signedByInitiator = signer.preV2Sign(aggTx, genHash);
 
-      const res = await fetch(`${CLOB_API_BASE}/api/clob/trading-account/cosign-withdrawal`, {
+      const res = await fetch(`${clobApiBase.value}/api/clob/trading-account/cosign-withdrawal`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -3769,7 +3808,7 @@ async function executeWithdraw() {
       const withdrawMsg = `${netId}:SiriusCLOB-v1:WITHDRAW:${e.asset}:${formattedAmt}:${cleanAddr}:${nonce}:${expiry}`;
       const signature = signer.signData(withdrawMsg);
 
-      const res = await fetch(`${CLOB_API_BASE}/api/clob/withdraw`, {
+      const res = await fetch(`${clobApiBase.value}/api/clob/withdraw`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -3935,8 +3974,13 @@ async function submitOrder() {
   const orderMsg = `${netId}:SiriusCLOB-v1:ORDER:${normPair}:${normSide}:${normType}:${priceStr}:${amountStr}:${nonce}:${expiry}`;
   const signature = signer.signData(orderMsg);
 
+  if (!clobApiBase.value) {
+    showToast('Mainnet Not Configured', 'Mainnet CLOB Gateway URL is not configured yet.', 'warning', 5000);
+    isSubmitting.value = false;
+    return;
+  }
   try {
-    const res = await fetch(`${CLOB_API_BASE}/api/clob/order`, {
+    const res = await fetch(`${clobApiBase.value}/api/clob/order`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -4026,7 +4070,7 @@ async function submitOrder() {
       handleApiError(res, data, 'Order Error');
     }
   } catch (err: any) {
-    showToast('Connection Error', `Could not reach CLOB service at ${CLOB_API_BASE} (${err.message})`, 'error', 5000);
+    showToast('Connection Error', `Could not reach CLOB service at ${clobApiBase.value} (${err.message})`, 'error', 5000);
   } finally {
     isSubmitting.value = false;
   }
@@ -4056,7 +4100,7 @@ async function cancelOrder(id: number) {
   const signature = signer.signData(cancelMsg);
 
   try {
-    const res = await fetch(`${CLOB_API_BASE}/api/clob/cancel`, {
+    const res = await fetch(`${clobApiBase.value}/api/clob/cancel`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -4106,7 +4150,7 @@ async function cancelAllOrders() {
   const signature = signer.signData(cancelAllMsg);
 
   try {
-    const res = await fetch(`${CLOB_API_BASE}/api/clob/cancel/all`, {
+    const res = await fetch(`${clobApiBase.value}/api/clob/cancel/all`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -4227,10 +4271,11 @@ function loadCandlesToChart() {
 }
 
 async function fetchRealCandles(tf?: ChartInterval) {
+  if (!clobApiBase.value) return;
   const targetTf = tf || activeInterval.value;
   const pairParam = selectedPair.value.toLowerCase().replace('/', '_');
   try {
-    const res = await fetch(`${CLOB_API_BASE}/api/clob/candles?pair=${pairParam}&interval=${targetTf}&limit=200`);
+    const res = await fetch(`${clobApiBase.value}/api/clob/candles?pair=${pairParam}&interval=${targetTf}&limit=200`);
     if (res.ok) {
       const data = await res.json();
       if (data.ok && Array.isArray(data.candles) && data.candles.length > 0) {
@@ -4453,30 +4498,14 @@ watch(myOpenOrders, () => {
   syncChartOrderLines();
 }, { deep: true });
 
-// Node Sync State + Real-Time WebSocket Client (/ws/clob)
-const tradeTimestampMap = new Map<string, string>();
-let pollTimer: any = null;
-let pollTickCount = 0;
-let activationPollTimer: any = null;
-let topUpPollTimer: any = null;
-let syncInFlight = false;
-let syncGeneration = 0;
-let lastDepthSig = '';
-let lastTradesSig = '';
-let lastOpenOrdersSig = '';
-
-const wsConnected = ref<boolean>(false);
-let clobWs: WebSocket | null = null;
-let wsReconnectTimer: any = null;
-let wsReconnectAttempts = 0;
-let wsDisposed = false;
-
+// Real-Time WebSocket Client (/ws/clob) — state vars hoisted above setup watchers
 function getClobWsUrl(): string {
+  const wsBase = getClobWsBase(getActiveNetworkId(), activeAccount.value?.address);
+  if (!wsBase) return '';
   const pairParam = selectedPair.value.toLowerCase().replace('/', '_');
   const pubKey = activeAccount.value?.publicKey || '';
-  const base = CLOB_API_BASE.replace(/^https:/i, 'wss:').replace(/^http:/i, 'ws:').replace(/\/+$/, '');
   const qs = `pair=${encodeURIComponent(pairParam)}${pubKey ? `&publicKey=${encodeURIComponent(pubKey)}` : ''}`;
-  return `${base}/ws/clob?${qs}`;
+  return `${wsBase}/ws/clob?${qs}`;
 }
 
 function sendWsSubscribe() {
@@ -4581,9 +4610,14 @@ function applyTradesPayload(tradeData: any[], pairParam: string) {
 
 function connectClobWs() {
   if (wsDisposed || typeof WebSocket === 'undefined') return;
+  const wsUrl = getClobWsUrl();
+  if (!wsUrl) {
+    wsConnected.value = false;
+    return;
+  }
   if (clobWs && (clobWs.readyState === WebSocket.OPEN || clobWs.readyState === WebSocket.CONNECTING)) return;
   try {
-    const ws = new WebSocket(getClobWsUrl());
+    const ws = new WebSocket(wsUrl);
     clobWs = ws;
     ws.onopen = () => {
       wsConnected.value = true;
@@ -4653,7 +4687,28 @@ watch(() => activeAccount.value?.publicKey, () => {
   fetchMySettlements({ autoCosign: false });
 });
 
+watch(clobApiBase, () => {
+  disconnectClobWs();
+  wsDisposed = false;
+  lastDepthSig = '';
+  lastTradesSig = '';
+  lastOpenOrdersSig = '';
+  if (clobApiBase.value) {
+    fetchClobConfig();
+    syncFromNode();
+    connectClobWs();
+  } else {
+    isConnected.value = false;
+    pendingSettlements.value = [];
+    recentSettlements.value = [];
+  }
+});
+
 async function syncFromNode() {
+  if (!clobApiBase.value) {
+    isConnected.value = false;
+    return;
+  }
   if (syncInFlight) return;
   syncInFlight = true;
   const myGen = ++syncGeneration;
@@ -4681,13 +4736,13 @@ async function syncFromNode() {
       ,
     ] = await Promise.allSettled([
       fetchOnChainBalances(),
-      fetchJsonSafe(`${CLOB_API_BASE}/api/clob/depth?pair=${pairParam}`),
-      fetchJsonSafe(`${CLOB_API_BASE}/api/clob/trades?pair=${pairParam}&limit=100`),
+      fetchJsonSafe(`${clobApiBase.value}/api/clob/depth?pair=${pairParam}`),
+      fetchJsonSafe(`${clobApiBase.value}/api/clob/trades?pair=${pairParam}&limit=100`),
       fetchRealCandles(activeInterval.value),
-      fetchJsonSafe(`${CLOB_API_BASE}/api/clob/oracle/pancakeswap`),
-      fetchJsonSafe(`${CLOB_API_BASE}/api/clob/orders/open?publicKey=${pubKey}&pair=${pairParam}`),
-      fetchJsonSafe(`${CLOB_API_BASE}/api/clob/mm/status`),
-      fetchJsonSafe(`${CLOB_API_BASE}/api/clob/balance?publicKey=${pubKey}`),
+      fetchJsonSafe(`${clobApiBase.value}/api/clob/oracle/pancakeswap`),
+      fetchJsonSafe(`${clobApiBase.value}/api/clob/orders/open?publicKey=${pubKey}&pair=${pairParam}`),
+      fetchJsonSafe(`${clobApiBase.value}/api/clob/mm/status`),
+      fetchJsonSafe(`${clobApiBase.value}/api/clob/balance?publicKey=${pubKey}`),
       fetchTradingAccountStatus(),
     ]);
 
@@ -4758,8 +4813,9 @@ async function syncFromNode() {
 }
 
 async function fetchClobConfig() {
+  if (!clobApiBase.value) return;
   try {
-    const res = await fetch(`${CLOB_API_BASE}/api/clob/config`);
+    const res = await fetch(`${clobApiBase.value}/api/clob/config`);
     if (res.ok) {
       const data = await res.json();
       if (data && data.ok) {
@@ -4828,6 +4884,11 @@ onMounted(async () => {
     if (wsConnected.value && pollTickCount % 4 !== 0) return;
     syncFromNode();
   }, 3000);
+  countdownTimer = setInterval(() => {
+    if (hasActivePendingSettlements.value) {
+      countdownNowMs.value = Date.now();
+    }
+  }, 15000);
 });
 
 onUnmounted(() => {
@@ -4849,6 +4910,10 @@ onUnmounted(() => {
     chart = null;
   }
   if (pollTimer) clearInterval(pollTimer);
+  if (countdownTimer) {
+    clearInterval(countdownTimer);
+    countdownTimer = null;
+  }
   if (activationPollTimer) {
     clearInterval(activationPollTimer);
     activationPollTimer = null;

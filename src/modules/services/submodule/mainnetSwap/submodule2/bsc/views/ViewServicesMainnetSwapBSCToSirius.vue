@@ -563,6 +563,7 @@ import { ethers } from 'ethers';
 import { abi, SwapUtils } from '@/util/swapUtils';
 import { networkState } from '@/state/networkState';
 import { ChainSwapConfig } from "@/models/stores/chainSwapConfig";
+import { getClobApiBase } from "@/modules/services/submodule/clob/clobConfig";
 import { Helper } from '@/util/typeHelper';
 import { AppState } from '@/state/appState';
 import { useI18n } from 'vue-i18n';
@@ -702,26 +703,17 @@ export default {
       }
     })
 
-    const getSwapApiBase = () => {
-      if (typeof window === 'undefined') return 'https://sirius-clob-backend.onrender.com';
-      const { hostname } = window.location;
-      if (hostname === 'localhost' || hostname === '127.0.0.1') {
-        return `http://${hostname}:8088`;
-      }
-      return 'https://sirius-clob-backend.onrender.com';
-    };
-    const swapApiBase = getSwapApiBase();
-
     const checkIsMainnet = () => {
       const netType = networkState.currentNetworkProfile?.network?.type;
       if (netType === 184) return true;
       const addr = walletState.currentLoggedInWallet?.accounts?.[0]?.address || '';
       return addr.startsWith('X');
     };
+    const swapApiBase = getClobApiBase(checkIsMainnet() ? 184 : 168);
 
     let swapData = new ChainSwapConfig(networkState.chainNetworkName);
     swapData.init();
-    if (!swapData.swap_XPX_BSC_URL || swapData.swap_XPX_BSC_URL.includes('xpxsirius.io')) {
+    if (swapApiBase && (!swapData.swap_XPX_BSC_URL || swapData.swap_XPX_BSC_URL.includes('xpxsirius.io'))) {
       swapData.swap_XPX_BSC_URL = `${swapApiBase}/api/swap/bsc`;
       swapData.swap_IN_SERVICE_URL = `${swapApiBase}/api/swap/sirius`;
       swapData.swap_SERVICE_URL = `${swapApiBase}/api/swap`;
