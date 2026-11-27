@@ -2566,9 +2566,14 @@ function lockTradingSession() {
 
 function getActiveNetworkId(): number {
   const addr = activeAccount.value?.address || '';
-  if (addr.startsWith('V')) return 168; // Sirius Testnet 2 (0xA8)
   if (addr.startsWith('X')) return 184; // Sirius Mainnet (0xB8)
-  return (walletState.currentLoggedInWallet as any)?.network || 168;
+  if (addr.startsWith('V')) return 168; // Sirius Testnet 2 (0xA8)
+  const walletNet = (walletState.currentLoggedInWallet as any)?.network;
+  if (walletNet === 184 || walletNet === 168) return walletNet;
+  const profileNet = networkState.currentNetworkProfile?.network?.type;
+  if (profileNet === 184 || profileNet === 168) return profileNet;
+  if (String(networkState.chainNetworkName || '').toLowerCase().includes('mainnet')) return 184;
+  return 168;
 }
 
 const explorerBaseUrl = computed(() => {
