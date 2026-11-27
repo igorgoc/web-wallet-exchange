@@ -356,6 +356,10 @@ async function activate() {
     errorMsg.value = 'No active wallet account selected.';
     return;
   }
+  if (!props.clobApiBase) {
+    errorMsg.value = 'CLOB Exchange API endpoint is not configured for this network.';
+    return;
+  }
 
   let ownerPriv = props.sessionKey || '';
   let rawPassword = '';

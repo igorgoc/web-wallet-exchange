@@ -2240,6 +2240,11 @@ async function claimFaucet() {
     4000
   );
 
+  if (!clobApiBase.value) {
+    showToast('Exchange Unavailable', clobApiUnavailableReason.value || 'CLOB Gateway endpoint is not configured for this network.', 'error');
+    return;
+  }
+
   try {
     const res = await fetch(`${clobApiBase.value}/api/clob/faucet`, {
       method: 'POST',
@@ -3729,6 +3734,11 @@ async function executeWithdraw() {
     }
   }
 
+  if (!clobApiBase.value) {
+    showToast('Exchange Unavailable', clobApiUnavailableReason.value || 'CLOB Gateway endpoint is not configured for this network.', 'error');
+    return;
+  }
+
   const signer = getSignerAccount();
   if (!signer) {
     pendingAction.value = 'withdraw';
@@ -4082,6 +4092,10 @@ async function submitOrder() {
 }
 
 async function cancelOrder(id: number) {
+  if (!clobApiBase.value) {
+    showToast('Exchange Unavailable', clobApiUnavailableReason.value || 'CLOB Gateway endpoint is not configured for this network.', 'error');
+    return;
+  }
   if (!activeAccount.value) {
     showToast('No Active Account', 'Signing refused: Please select or connect an active wallet account before placing orders.', 'error');
     return;
@@ -4133,6 +4147,10 @@ async function cancelOrder(id: number) {
 }
 
 async function cancelAllOrders() {
+  if (!clobApiBase.value) {
+    showToast('Exchange Unavailable', clobApiUnavailableReason.value || 'CLOB Gateway endpoint is not configured for this network.', 'error');
+    return;
+  }
   if (!activeAccount.value) {
     showToast('No Active Account', 'Signing refused: Please select or connect an active wallet account before placing orders.', 'error');
     return;
