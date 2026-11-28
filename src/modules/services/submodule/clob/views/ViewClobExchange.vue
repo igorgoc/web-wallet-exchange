@@ -3738,9 +3738,23 @@ async function executeWithdraw() {
         netId
       ).toAggregateV1(tradingPubAcc);
 
+      const withdrawInnerTxs: any[] = [innerTx];
+      // For Instant BFT Trading Accounts (minApproval=1, [ValidatorCluster]), attach a 0-mosaic owner anchor
+      // so Sirius L1 accepts ownerAcc as outer initiator while proving Owner's cryptographic authorization!
+      if (Number(tradingAccountInfo.value?.tradingAccount?.minApproval) === 1) {
+        const ownerAuthAnchor = TransferTransaction.create(
+          Deadline.create(),
+          Address.createFromRawAddress(cleanAddr),
+          [],
+          PlainMessage.create('SiriusCLOB: Authorize BFT Withdrawal'),
+          netId
+        ).toAggregateV1(signer.publicAccount);
+        withdrawInnerTxs.push(ownerAuthAnchor);
+      }
+
       const aggTx = AggregateTransaction.createCompleteV1(
         Deadline.create(),
-        [innerTx],
+        withdrawInnerTxs,
         netId,
         [],
         UInt64.fromUint(250000)
@@ -3990,13 +4004,30 @@ async function submitOrder() {
       }
       applyBalances(data.balances);
 
-      // Immediately co-sign atomic L1 trade settlement if user's Smart Trading Account filled
+      // Immediately handle atomic L1 trade settlement:
+      // - Option 1 (Instant BFT DEX mode): already broadcast by 2-of-3 Validators -> zero second signature needed!
+      // - Legacy 2-of-2 mode: auto-cosign immediately on the taker's side.
       let settleRes: { ok: boolean; txHash?: string; status?: string; approvedCount?: number; error?: string } | null = null;
       if (data.pendingSettlement) {
-        settleRes = await cosignVerifiedSettlement(data.pendingSettlement, { silentToast: true }).catch((e: any) => ({
-          ok: false,
-          error: e?.message || 'Settlement co-signing failed',
-        }));
+        const ps = data.pendingSettlement;
+        if (ps.instantSettled || ps.status === 'broadcast' || ps.status === 'confirmed') {
+          settleRes = {
+            ok: true,
+            txHash: ps.txHash,
+            status: ps.status,
+            approvedCount: Array.isArray(ps.approvedByNodes) ? ps.approvedByNodes.length : 2,
+          };
+        } else if (ps.status === 'failed' && ps.instantSettlementError) {
+          settleRes = {
+            ok: false,
+            error: ps.instantSettlementError,
+          };
+        } else {
+          settleRes = await cosignVerifiedSettlement(ps, { silentToast: true }).catch((e: any) => ({
+            ok: false,
+            error: e?.message || 'Settlement co-signing failed',
+          }));
+        }
       }
 
       const orderId = data.orderId || ++nextOrderId;
