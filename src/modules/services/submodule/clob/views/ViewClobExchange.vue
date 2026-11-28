@@ -115,15 +115,6 @@
             + Top Up
           </button>
           <button
-            v-if="settlementsNeedingMySignature.length > 0"
-            type="button"
-            class="header-action-pill bg-amber-500/20 border border-amber-400 text-amber-300 hover:bg-amber-500/30 animate-pulse !px-2.5 !text-[11px] whitespace-nowrap"
-            @click="focusOpenOrdersAndSign"
-            title="You have matched CLOB order(s) waiting for your settlement signature"
-          >
-            ⚠ Sign ({{ settlementsNeedingMySignature.length }})
-          </button>
-          <button
             type="button"
             class="header-action-pill pill-withdraw"
             @click="openWithdrawModal"
@@ -240,30 +231,6 @@
           <div class="tab-content">
             <!-- Open Orders Table -->
             <div v-if="activeTab === 'orders'" class="table-container">
-              <!-- Prominent Action Banner inside Open Orders when User1 needs to sign matched order(s) -->
-              <div
-                v-if="settlementsNeedingMySignature.length > 0"
-                class="mx-2 my-2 px-3 py-2 rounded-lg border border-amber-400/70 bg-amber-500/15 flex flex-wrap items-center justify-between gap-2 text-xs"
-              >
-                <div class="text-amber-200 leading-snug">
-                  <span class="font-extrabold text-amber-300">⚠ Signature Required: </span>
-                  <span v-for="(item, idx) in settlementsNeedingMySignature" :key="item.settlementId">
-                    <span v-if="idx > 0">, </span>
-                    <strong class="font-mono text-white">Order #{{ item.myOrderId || item.orderId }}</strong>
-                    ({{ item.mySide.toUpperCase() }} {{ item.myAmount }} XPX<template v-if="item.myPrice"> @ {{ item.myPrice }} {{ item.quoteSymbol }}</template>)
-                  </span>
-                  — counterparty signed, please sign to complete L1 settlement.
-                </div>
-                <button
-                  type="button"
-                  class="px-3 py-1 rounded bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xs cursor-pointer disabled:opacity-60"
-                  :disabled="isSettlingPending || Boolean(signingSettlementId)"
-                  @click="settlePendingTradesNow"
-                >
-                  {{ isSettlingPending ? 'Signing...' : 'Sign Now' }}
-                </button>
-              </div>
-
               <table class="clob-table">
                 <thead>
                   <tr>
