@@ -83,7 +83,7 @@
             type="button"
             class="header-action-pill pill-pending"
             disabled
-            title="2-of-2 Multisig activation confirming on Sirius L1 (~15s)"
+            title="Smart Trading Account activation confirming on Sirius L1 (~15–30s)"
           >
             Activating...
           </button>
@@ -101,7 +101,7 @@
             type="button"
             class="header-action-pill pill-activate"
             @click="openTradingSetupModal"
-            title="Activate Non-Custodial 2-of-2 Co-Signed Smart Trading Account"
+            title="Activate Smart Trading Account (1-Click On-Chain Trading)"
           >
             Activate Smart Trading
           </button>
@@ -110,7 +110,7 @@
             type="button"
             class="header-action-pill pill-topup"
             @click="openTopUpModal"
-            title="Transfer coins from Personal Wallet to your 2-of-2 Smart Trading Account"
+            title="Transfer coins from Personal Wallet to your Smart Trading Account"
           >
             + Top Up
           </button>
@@ -274,13 +274,17 @@
                         v-else-if="s.allPartiesSigned && s.status === 'confirmed'"
                         class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/40"
                       >
-                        ✓ Signed by both users ({{ s.signedCount }}/{{ s.requiredCount }}) · Confirmed on L1
+                        <template v-if="s.requiredCount === 0">✓ Auto-settled · Confirmed on L1</template>
+                        <template v-else-if="s.requiredCount === 1">✓ Signed ({{ s.signedCount }}/{{ s.requiredCount }}) · Confirmed on L1</template>
+                        <template v-else>✓ Signed by both users ({{ s.signedCount }}/{{ s.requiredCount }}) · Confirmed on L1</template>
                       </span>
                       <span
                         v-else-if="s.allPartiesSigned"
                         class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/40"
                       >
-                        ✓ Signed by both users ({{ s.signedCount }}/{{ s.requiredCount }}) · Settling on L1...
+                        <template v-if="s.requiredCount === 0">⏳ Auto-settling on L1...</template>
+                        <template v-else-if="s.requiredCount === 1">✓ Signed ({{ s.signedCount }}/{{ s.requiredCount }}) · Settling on L1...</template>
+                        <template v-else>✓ Signed by both users ({{ s.signedCount }}/{{ s.requiredCount }}) · Settling on L1...</template>
                       </span>
                       <span
                         v-else
@@ -793,7 +797,7 @@
               type="button"
               class="header-action-pill pill-pending"
               disabled
-              title="2-of-2 Multisig activation confirming on Sirius L1 (~15s)"
+              title="Smart Trading Account activation confirming on Sirius L1 (~15–30s)"
             >
               Activating...
             </button>
@@ -811,7 +815,7 @@
               type="button"
               class="header-action-pill pill-activate"
               @click="openTradingSetupModal"
-              title="Activate Non-Custodial 2-of-2 Co-Signed Smart Trading Account"
+              title="Activate Smart Trading Account (1-Click On-Chain Trading)"
             >
               Activate Smart Trading
             </button>
@@ -820,7 +824,7 @@
               type="button"
               class="header-action-pill pill-topup"
               @click="openTopUpModal"
-              title="Transfer coins from Personal Wallet to your 2-of-2 Smart Trading Account"
+              title="Transfer coins from Personal Wallet to your Smart Trading Account"
             >
               + Top Up
             </button>
@@ -1088,6 +1092,8 @@
                 <div class="text-[10px] mt-0.5" :class="s.needsMySignature ? 'text-amber-300 font-bold' : (s.allPartiesSigned ? 'text-emerald-300 font-bold' : 'text-sky-300')">
                   <template v-if="s.needsMySignature">⚠ Needs your signature ({{ s.signedCount }}/{{ s.requiredCount }})</template>
                   <template v-else-if="s.waitingForCounterparty">⏳ Signed by you only ({{ s.signedCount }}/{{ s.requiredCount }}) — waiting counterparty</template>
+                  <template v-else-if="s.allPartiesSigned && s.requiredCount === 0">{{ s.status === 'confirmed' ? '✓ Auto-settled · Confirmed on L1' : '⏳ Auto-settling on L1...' }}</template>
+                  <template v-else-if="s.allPartiesSigned && s.requiredCount === 1">✓ Signed ({{ s.signedCount }}/{{ s.requiredCount }})</template>
                   <template v-else-if="s.allPartiesSigned">✓ Signed by both users ({{ s.signedCount }}/{{ s.requiredCount }})</template>
                 </div>
               </div>
@@ -1245,10 +1251,14 @@
                       ⏳ Signed by you only ({{ s.signedCount }}/{{ s.requiredCount }}) — waiting for counterparty<template v-if="s.expiresAtMs"> · {{ formatSettlementCountdown(s.expiresAtMs, countdownNowMs) }}</template>
                     </span>
                     <span v-else-if="s.allPartiesSigned && s.status === 'confirmed'" class="text-emerald-300">
-                      ✓ Signed by both users ({{ s.signedCount }}/{{ s.requiredCount }}) · Confirmed on L1
+                      <template v-if="s.requiredCount === 0">✓ Auto-settled · Confirmed on L1</template>
+                      <template v-else-if="s.requiredCount === 1">✓ Signed ({{ s.signedCount }}/{{ s.requiredCount }}) · Confirmed on L1</template>
+                      <template v-else>✓ Signed by both users ({{ s.signedCount }}/{{ s.requiredCount }}) · Confirmed on L1</template>
                     </span>
                     <span v-else-if="s.allPartiesSigned" class="text-emerald-300">
-                      ✓ Signed by both users ({{ s.signedCount }}/{{ s.requiredCount }}) · Settling on L1...
+                      <template v-if="s.requiredCount === 0">⏳ Auto-settling on L1...</template>
+                      <template v-else-if="s.requiredCount === 1">✓ Signed ({{ s.signedCount }}/{{ s.requiredCount }}) · Settling on L1...</template>
+                      <template v-else>✓ Signed by both users ({{ s.signedCount }}/{{ s.requiredCount }}) · Settling on L1...</template>
                     </span>
                   </div>
                   <div v-if="s.needsMySignature || (s.txHash && s.allPartiesSigned)" class="mobile-order-card-footer mt-2">
@@ -1458,7 +1468,7 @@
               <h3>{{ hasSmartTradingAccount ? 'Withdraw to Personal Wallet' : 'Withdraw to Sirius Wallet' }}</h3>
               <p class="modal-subtitle">
                 {{ hasSmartTradingAccount
-                  ? 'Withdraw XPX, USDT, and BNB together in one 2-of-2 L1 transaction (~15–30s)'
+                  ? 'Withdraw XPX, USDT, and BNB together in one Sirius L1 transaction (~15–30s)'
                   : 'Transfer available funds from CLOB Vault to your Sirius account' }}
               </p>
             </div>
@@ -3114,7 +3124,7 @@ function onTradingAccountActivated(res: any) {
         activationPollTimer = null;
       }
       if (hasSmartTradingAccount.value) {
-        showToast('Smart Trading Account Active!', 'Your 2-of-2 Smart Trading Account is confirmed on Sirius L1!', 'success', 5000);
+        showToast('Smart Trading Account Active!', 'Your Smart Trading Account is confirmed on Sirius L1!', 'success', 5000);
         syncFromNode();
       }
     }
@@ -3287,7 +3297,7 @@ async function executeTopUp() {
   }
   if (normalizeAddrStr(activeAccount.value?.address) === normalizeAddrStr(tradingAccountAddress.value)) {
     const ownerAddr = tradingAccountInfo.value?.tradingAccount?.ownerAddress || 'your main account';
-    topUpError.value = `To top up this 2-of-2 Trading Account, make sure linked main account (${ownerAddr}) is in your wallet.`;
+    topUpError.value = `To top up this Smart Trading Account, make sure linked main account (${ownerAddr}) is in your wallet.`;
     return;
   }
   const entries = parseAssetAmounts(topUpAmounts.value);
@@ -3606,7 +3616,7 @@ async function cosignVerifiedSettlement(
         } else if (data.txHash) {
           showToast(
             'Atomic L1 Settlement Broadcast!',
-            `2-of-2 Peer-to-Peer swap signed by you & ${approvedCount} validator nodes.`,
+            `On-chain atomic swap verified by ${approvedCount} validator nodes.`,
             'trade',
             5000,
             data.txHash
@@ -3680,7 +3690,7 @@ async function executeWithdraw() {
   if (isWithdrawing.value) return;
   if (hasSmartTradingAccount.value && normalizeAddrStr(activeAccount.value?.address) === normalizeAddrStr(tradingAccountAddress.value)) {
     const ownerAddr = tradingAccountInfo.value?.tradingAccount?.ownerAddress || 'your main account';
-    withdrawError.value = `To co-sign withdrawals for this 2-of-2 Trading Account, import/select linked main account (${ownerAddr}) in your wallet.`;
+    withdrawError.value = `To authorize withdrawals for this Smart Trading Account, import/select linked main account (${ownerAddr}) in your wallet.`;
     return;
   }
   const entries = parseAssetAmounts(withdrawAmounts.value);
@@ -3865,7 +3875,7 @@ async function handleTradeButtonClick() {
     if (isTradingAccountPending.value) {
       showToast(
         "Smart Trading Account Confirming",
-        "Your 2-of-2 Smart Trading Account is confirming on Sirius L1 (~15–30s). Please wait a moment before placing orders.",
+        "Your Smart Trading Account is confirming on Sirius L1 (~15–30s). Please wait a moment before placing orders.",
         "info",
         5000
       );
@@ -3873,7 +3883,7 @@ async function handleTradeButtonClick() {
     }
     showToast(
       "Activate Smart Trading First",
-      "The exchange will create a 2-of-2 Smart Trading Account (Signer 1: your Wallet, Signer 2: Validator Nodes Cluster). All trading runs through this account.",
+      "Activate your Smart Trading Account to enable 1-click on-chain trading protected by 2-of-3 independent validator nodes.",
       "info",
       6000
     );
