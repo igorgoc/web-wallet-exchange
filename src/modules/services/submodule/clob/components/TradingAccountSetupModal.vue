@@ -6,7 +6,7 @@
           <span class="modal-icon">🛡️</span>
           <div>
             <h3>Activate Smart Trading Account</h3>
-            <p class="modal-subtitle">Instant 1-Click DEX • 2-of-3 BFT Validator Protection</p>
+            <p class="modal-subtitle">1-Click On-Chain Trading • Protected by 2-of-3 Validator Nodes</p>
           </div>
         </div>
         <button class="modal-close-btn" @click="handleClose">✕</button>
@@ -16,15 +16,15 @@
         <div class="security-Guarantee-box mb-3">
           <div class="guarantee-row">
             <span class="badge-ok">🔐</span>
-            <span><strong>2-of-3 BFT Protected Trading Account:</strong> Creates a dedicated Sirius L1 Trading Account secured by <strong>2-of-3 Independent Validator Nodes</strong> that verify your cryptographic Ed25519 signed orders before moving any funds.</span>
+            <span><strong>Dedicated Trading Account:</strong> Creates a separate Sirius L1 account for exchange trading. Funds can only move when at least <strong>2 of 3 independent validator nodes</strong> verify your signed order or withdrawal.</span>
           </div>
           <div class="guarantee-row">
             <span class="badge-ok">⚡</span>
-            <span><strong>Instant 1-Click Limit &amp; Market Settlement:</strong> Sign once when placing a limit order — even if you close your wallet, matched trades settle automatically on Sirius L1 with zero second signature needed.</span>
+            <span><strong>Sign Once, Settle Automatically:</strong> You only sign when placing an order. Matched limit and market orders settle automatically on Sirius L1 — even if you close your wallet.</span>
           </div>
           <div class="guarantee-row">
             <span class="badge-ok">⏳</span>
-            <span><strong>Block confirmation:</strong> Please wait ~15–30 seconds after activating (one-time L1 fee: ~0.25 XPX).</span>
+            <span><strong>One-Time Setup:</strong> Activation takes ~15–30 seconds to confirm on-chain (one-time network fee: ~0.25 XPX).</span>
           </div>
         </div>
 
